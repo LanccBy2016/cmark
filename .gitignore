@@ -1,0 +1,13 @@
+node_modules/
+dist/
+*.asar
+.DS_Store
+
+# 构建产物与本地文件
+tmp/
+
+# 内部文档与临时脚本，不入库
+SPEC.md
+EDITOR-SPEC.md
+待办与现状.md
+__probe_*.mjs

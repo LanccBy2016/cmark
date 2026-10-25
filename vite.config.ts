@@ -1,0 +1,29 @@
+import { fileURLToPath, URL } from 'node:url'
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  base: './',
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    target: 'chrome108',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          markdown: ['marked', 'katex', 'highlight.js', 'dompurify'],
+          // 图表库体积大且只在含 mermaid / echarts 代码块时才需要，单独拆包按需加载
+          mermaid: ['mermaid'],
+          echarts: ['echarts'],
+        },
+      },
+    },
+  },
+  server: { port: 5273 },
+})
