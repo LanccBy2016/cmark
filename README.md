@@ -5,7 +5,7 @@ Obsidian 的轻量替代。本地 Markdown 笔记，文件是你的，版本用 
 跑在 [ZTools](https://github.com/ztools) 插件体系里。
 
 <p align="center">
-  <img src="docs/screenshot.png" width="480" alt="一篇覆盖全部语法的笔记，导出成长图的样子">
+  <a href="docs/screenshot.png">看一篇覆盖全部语法的笔记，导出成长图的样子</a>
 </p>
 
 ## 为什么用它
@@ -31,6 +31,33 @@ Obsidian 的轻量替代。本地 Markdown 笔记，文件是你的，版本用 
 
 连续失败会自动暂停并留下原因，不会在后台无声地失败。本地另留一份快照轮转，
 误删也有兜底。
+
+## 界面
+
+### 编辑区
+
+左边是磁盘上的真实目录和当前分支，右边是编辑区，格式工具栏在上方。
+
+<p align="center">
+  <img src="docs/ui-editor.png" width="800" alt="编辑区">
+</p>
+
+### 版本与改动
+
+侧边栏里就能看逐行 diff、撤销单个文件的改动，或者切到提交历史。
+
+<p align="center">
+  <img src="docs/ui-diff.png" width="430" alt="改动对比">
+  <img src="docs/ui-history.png" width="430" alt="提交历史">
+</p>
+
+### 设置
+
+笔记目录、自动同步、提交选项都在一个面板里。
+
+<p align="center">
+  <img src="docs/ui-settings.png" width="430" alt="设置面板">
+</p>
 
 ## 功能对比
 
