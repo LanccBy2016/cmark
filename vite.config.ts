@@ -11,7 +11,10 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // 输出目录必须叫 app，不能用 dist：
+    // ZTools 发布 CLI 的 COPY_IGNORE_DIRS 会跳过 dist/build/node_modules，
+    // 产物放进 dist 就拿不上去。市场要求构建产物随源码一起提交。
+    outDir: 'app',
     emptyOutDir: true,
     target: 'chrome108',
     rollupOptions: {

@@ -1,5 +1,6 @@
 node_modules/
 dist/
+# 注意：app/ 是构建产物，但必须入库（ZTools 市场要求），不要加进这里
 *.asar
 .DS_Store
 

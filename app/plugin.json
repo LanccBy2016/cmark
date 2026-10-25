@@ -1,0 +1,242 @@
+{
+  "name": "cmark",
+  "pluginName": "CMark",
+  "title": "CMark",
+  "version": "1.1.0",
+  "description": "本地 Markdown 笔记，用 Git 管理版本、同步多端",
+  "author": "Lancc",
+  "main": "index.html",
+  "preload": "preload.js",
+  "logo": "logo.png",
+  "pluginSetting": {
+    "single": false
+  },
+  "features": [
+    {
+      "code": "cmark",
+      "explain": "使用 Git 管理你的 Markdown 笔记",
+      "cmds": [
+        "markdown",
+        "cmark",
+        "md",
+        "cm"
+      ]
+    }
+  ],
+  "tools": {
+    "markdown_render": {
+      "description": "将 Markdown 文本渲染为图片或 PDF 文件，用于可视化展示或文档导出。\n\n支持扩展语法（可直接使用）：\n- Mermaid 图表：```mermaid 代码块\n- ECharts 图表：```echarts 代码块\n- LaTeX 数学公式：$...$（行内）、$$...$$（块级）\n- 任务列表：- [ ] / - [x]\n- 高亮标记：==text==\n- 多语言代码高亮：```js / ```python 等\n\n当需要生成包含图表、流程图、公式或代码展示的内容时优先使用此工具。\n输入内容将被直接渲染，请确保语法正确。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "markdown": {
+            "type": "string",
+            "description": "Markdown 原文内容"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "image",
+              "pdf"
+            ],
+            "description": "输出格式：image（图片）或 pdf（文档）"
+          }
+        },
+        "required": [
+          "markdown",
+          "format"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "生成文件的本地路径"
+          }
+        },
+        "required": [
+          "filePath"
+        ]
+      }
+    },
+    "markdown_notes_search": {
+      "description": "搜索 Markdown 笔记（标题和正文），返回匹配结果摘要，不包含完整正文。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "搜索关键词"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "返回结果数量上限",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "query"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "notes": {
+            "type": "array",
+            "description": "匹配的笔记摘要列表",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "笔记唯一 ID"
+                },
+                "title": {
+                  "type": "string",
+                  "description": "笔记标题"
+                },
+                "snippet": {
+                  "type": "string",
+                  "description": "匹配内容摘要"
+                },
+                "matchedField": {
+                  "type": "string",
+                  "enum": [
+                    "title",
+                    "content"
+                  ],
+                  "description": "命中的字段"
+                },
+                "createAt": {
+                  "type": "integer",
+                  "description": "创建时间戳（毫秒）"
+                },
+                "updateAt": {
+                  "type": "integer",
+                  "description": "最后修改时间戳（毫秒）"
+                },
+                "wordCount": {
+                  "type": "integer",
+                  "description": "正文字数"
+                }
+              },
+              "required": [
+                "id",
+                "title",
+                "snippet",
+                "matchedField"
+              ]
+            }
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "是否还有更多结果"
+          }
+        },
+        "required": [
+          "notes",
+          "total"
+        ]
+      }
+    },
+    "markdown_notes_get": {
+      "description": "获取笔记内容。支持获取原始 Markdown 文本或将笔记内容渲染为图片/PDF 文件。",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "笔记唯一 ID"
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "text",
+              "image",
+              "pdf"
+            ],
+            "default": "text",
+            "description": "输出格式：'text' 返回 Markdown 源码；'image'/'pdf' 返回渲染后的本地文件路径。"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string",
+            "description": "笔记标题"
+          },
+          "updateAt": {
+            "type": "integer",
+            "description": "最后修改时间戳（毫秒）"
+          },
+          "content": {
+            "type": "string",
+            "description": "笔记的 Markdown 源码。仅在 format 为 text 时提供。"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "渲染文件的绝对路径。仅在 format 为 image 或 pdf 时提供。"
+          },
+          "mimeType": {
+            "type": "string",
+            "description": "内容的标准 MIME 类型（如 text/markdown, image/png, application/pdf）"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ]
+      }
+    },
+    "markdown_notes_create": {
+      "description": "创建一条新的 Markdown 笔记",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 50,
+            "description": "笔记标题"
+          },
+          "content": {
+            "type": "string",
+            "description": "笔记内容（Markdown 源码）"
+          }
+        },
+        "required": [
+          "title",
+          "content"
+        ]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "description": "是否成功"
+          },
+          "message": {
+            "type": "string",
+            "description": "结果说明"
+          }
+        }
+      }
+    }
+  },
+  "homepage": "https://github.com/LanccBy2016/cmark"
+}
