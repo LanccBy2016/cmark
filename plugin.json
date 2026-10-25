@@ -1,9 +1,9 @@
 {
-  "name": "cmark-dev",
-  "pluginName": "CMark Dev",
+  "name": "cmark",
+  "pluginName": "CMark",
   "title": "CMark Dev",
   "version": "1.1.0",
-  "description": "本地 Markdown 笔记，用 git 同步",
+  "description": "本地 Markdown 笔记，用 Git 管理版本、同步多端",
   "author": "Lancc",
   "main": "index.html",
   "preload": "preload.js",
@@ -13,12 +13,13 @@
   },
   "features": [
     {
-      "code": "cmark-dev",
-      "explain": "CMark 重构版（Slate 编辑器，开发中）",
+      "code": "cmark",
+      "explain": "使用 Git 管理你的 Markdown 笔记",
       "cmds": [
-        "cmarkdev",
-        "cmdev",
-        "cm1"
+        "markdown",
+        "cmark",
+        "md",
+        "cm"
       ]
     }
   ],
@@ -236,5 +237,6 @@
         }
       }
     }
-  }
+  },
+  "homepage": "https://github.com/LanccBy2016/cmark"
 }
