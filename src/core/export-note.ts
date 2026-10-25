@@ -47,7 +47,13 @@ function svc(): Svc | undefined {
 
 /* ================= 编辑区 DOM 快照 ================= */
 
-/** 交互元素不进导出物 */
+/**
+ * 交互元素不进导出物。
+ * 新增任何只在编辑态出现的控件（按钮、滑杆、浮层、判定带），都必须加进这个列表，
+ * 否则它会在鼠标悬停时被快照进去，出现在导出图片里。
+ * 踩过：图片工具条从 .img-tools 改名成 .img-handle 时漏了这条，
+ * 导出的长图里就带着缩放滑杆和两个按钮。
+ */
 const SNAPSHOT_STRIP = [
   '.void-gap',
   '.code-head',
@@ -56,6 +62,7 @@ const SNAPSHOT_STRIP = [
   '.code-editor-copy',
   '.table-caption',
   '.table-float-toolbar',
+  '.img-handle',
   '.img-tools',
   '.math-edit-pop',
   '.diagram-err',
@@ -117,6 +124,11 @@ const SNAPSHOT_PROPS = [
   'width',
   'height',
   'opacity',
+  // zoom 必须和 width/height 一起内联。
+  // 被缩放的元素，computed width/height 是未缩放的原始值（实测图片 828px），
+  // 而容器高度是按缩放后算的（393px）。只抄尺寸不抄 zoom，图片就会按 828px 撑开、
+  // 溢出容器四百多像素，直接盖住下面的正文。
+  'zoom',
   // —— 定位与布局：这一组漏了会导致整块内容飞掉 ——
   // ECharts 的 SVG 是 position:absolute，靠 .diagram-canvas 的 position:relative 兜住；
   // 不内联 position，导出后容器变 static，图形会相对外层祖先定位、直接错位。

@@ -4,6 +4,10 @@ Obsidian 的轻量替代。本地 Markdown 笔记，文件是你的，版本用 
 
 跑在 [ZTools](https://github.com/ztools) 插件体系里。
 
+<p align="center">
+  <img src="docs/screenshot.png" width="480" alt="一篇覆盖全部语法的笔记，导出成长图的样子">
+</p>
+
 ## 为什么用它
 
 ### 笔记就是文件
