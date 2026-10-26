@@ -17,7 +17,6 @@
       "explain": "使用 Git 管理你的 Markdown 笔记",
       "cmds": [
         "markdown",
-        "cmark",
         "md",
         "cm"
       ]

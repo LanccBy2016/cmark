@@ -46,6 +46,14 @@ import { KEYS } from 'platejs'
 import { toggleList } from '@platejs/list'
 
 import { preDeserialize, postDeserialize, markToPlaceholder, placeholderToMd, protectSyntax } from '../core/md-marks'
+
+/** HTML 属性转义：图片 URL 里出现 & 或引号时不能直接拼进 <img> */
+const escHtmlAttr = (v: string): string =>
+  String(v)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
 import { useNotes } from '../store/notes'
 import {
   BlockquoteElement,
@@ -238,6 +246,51 @@ export function Editor() {
           // GFM 才有表格、任务列表、删除线；公式要 remark-math
           remarkPlugins: [remarkGfm, remarkMath],
           remarkStringifyOptions: stringify,
+          rules: {
+            // 图片尺寸：有 width 就写成 HTML <img src width>，没有就走默认 ![alt](url)。
+            //
+            // 为什么是 HTML 而不是 markdown 语法：markdown 本身没有图片尺寸标准，
+            // {width=50%} 这类属性扩展只有 pandoc 系认；HTML img 的 width 属性
+            // Obsidian / Typora / VS Code / GitHub 都认，是唯一能跨编辑器生效的写法。
+            // 只在用户真的拖过缩放条时才生成 HTML，没动过的图片源文件保持干净。
+            //
+            // 反序列化方向由 md-marks.ts 的 preDeserialize + restoreHtmlImgs 负责：
+            // remark-mdx 见到不带 /> 的 <img> 会直接抛错，所以必须在解析前摘走。
+            img: {
+              // 类型上 @platejs/markdown 声明 serialize 只返回 mdast Image，
+              // 但运行时允许返回 paragraph / html（它自己的默认 img 规则就返回 paragraph），
+              // 所以这里显式放宽类型。
+              serialize: ((node: Record<string, unknown>) => {
+                const url = String(node.url || '')
+                const cap = Array.isArray(node.caption) ? (node.caption as Array<{ text?: string }>) : []
+                const alt = cap.map((c) => String((c && c.text) || '')).join('')
+                const w = Number(node.width)
+                const pctW = typeof node.widthPct === 'string' ? node.widthPct : ''
+                let widthAttr = ''
+                if (Number.isFinite(w) && w > 0) widthAttr = ' width="' + Math.round(w) + '"'
+                else if (pctW) widthAttr = ' width="' + escHtmlAttr(pctW) + '"'
+
+                if (!widthAttr) {
+                  return {
+                    type: 'paragraph',
+                    children: [
+                      {
+                        type: 'image',
+                        url,
+                        alt: alt || undefined,
+                        title: typeof node.title === 'string' ? node.title : undefined,
+                      },
+                    ],
+                  }
+                }
+                return {
+                  type: 'html',
+                  value:
+                    '<img src="' + escHtmlAttr(url) + '" alt="' + escHtmlAttr(alt) + '"' + widthAttr + '>',
+                }
+              }) as never,
+            },
+          },
         },
       }),
     ],

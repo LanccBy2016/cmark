@@ -98,9 +98,8 @@ Obsidian 的轻量替代。本地 Markdown 笔记，文件是你的，版本用 
 | Git 版本控制 | 插件支持 | ✓ 内置，侧边栏操作 |
 | 历史版本查看 | 插件支持 | ✓ 点任意提交看该版全文 |
 | 差异对比 diff | 插件支持 | ✓ 工作区改动与单次提交都可看 |
-| 单文件撤销 | 插件支持 | ✓ 只丢一个文件的改动 |
 | 自动同步 | 插件支持 | ✓ 定时提交推送，失败自动暂停 |
-| 回收站 | ✓ | ✓ 删除进回收站，本地快照轮转 |
+| 回收站 | ✓ | ✓ 内置git版本回溯 |
 
 ### 导出
 
@@ -125,16 +124,54 @@ CMark 不跟 Obsidian 抢生态。它只解决一件更窄的事：
 
 ## 安装
 
-从 ZTools 插件市场安装。
+### 方式一：插件市场（推荐）
 
-## 开发
+ZTools 里搜 `markdown` 或 `cmark`，装上即用。
+
+### 方式二：离线安装包（GitHub Releases）
+
+适合市场审核期间、内网环境，或者想锁定某个版本。
+
+1. 到 [Releases](https://github.com/LanccBy2016/cmark/releases) 下载最新的 `cmark-<版本>.zpx`（或 `.zip`）
+2. 打开 ZTools → 设置 → 插件 → 右上角「更多」→ 导入本地插件
+3. 选中刚下载的文件，确认安全提示后安装
+4. 首次打开会让你选一个笔记目录：选空文件夹即可，选已有 `.md` 的目录也能直接接管
+
+两种包内容完全一样，装一个就够：
+
+- `.zpx` —— asar 的 gzip 压缩包，体积小（约 4 MB）
+- `.zip` —— 解压后就是插件根目录（约 10 MB）
+
+两条渠道装的是同一个插件位（插件名相同），后装的会覆盖先装的，**插件数据（配置、历史）保留**。
+
+### 方式三：从源码构建
 
 ```bash
 npm install
-npm run dev      # 本地调试
-npm run build    # 构建，产物在 dist/
-npm run pack     # 打包成 ZTools 插件
+npm run dev                # 本地调试（vite 热更新）
+npm run build              # 前端构建，产物在 app/
+node scripts/pack.mjs      # 把 plugin.json / preload 复制进 app/
+node scripts/register.cjs  # 打成 asar 并注册到本机 ZTools（执行前先退出 ZTools）
 ```
+
+打离线包（需要 `@electron/asar`，可用 `ASAR_CLI` 环境变量指定路径）：
+
+```bash
+node scripts/pack-zpx.mjs        # 产出 release/cmark-<版本>.zpx
+node scripts/pack-zpx.mjs --zip  # 同时产出 .zip
+```
+
+## 首次使用
+
+1. 选笔记目录（可以就是你已有的 Markdown 目录）
+2. 在左侧「版本控制」里初始化仓库：填远程地址（GitHub / Gitee 都行），或只建本地仓库
+3. 打开「定时提交并推送」，插件会按设定间隔自动 commit + push
+
+笔记就是磁盘上的 `.md` 文件，没有私有格式。`.cmark/` 只存排序、只读标记、图片附件这类元数据，随仓库一起提交。图片尺寸以 `<img ... width="320">` 写回 Markdown 本身，Obsidian / Typora / VS Code 打开同一份文件看到的大小一致。
+
+## 卸载
+
+卸载插件不会删笔记（笔记在你自己选的目录里）。`~/.cmark-config.json` 记录着笔记目录路径，删掉它等于重新走首次引导。
 
 ## 许可
 

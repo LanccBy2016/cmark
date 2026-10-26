@@ -369,10 +369,61 @@ module.exports = function attachSettingsPanel (win) {
         <div class="zgp-desc" id="s-info"></div>
         <div class="zgp-desc" id="s-attach" style="margin-top:8px">附件：统计中…</div>
         <div style="margin-top:8px">
-          <button class="zgp-b" id="s-attach-clean" title="把没有任何笔记引用的附件移到回收站">清理未引用附件</button>
+          <button class="zgp-b" id="s-attach-clean" title="直接删除没有任何笔记引用的附件（不做回收站，误删可从 git 历史取回）">清理未引用附件</button>
         </div>
       </div>
     `
+
+    // 附件统计 + 清理未引用附件。之前这个按钮根本没绑处理函数，点了没反应。
+    // 清理是真删（不做回收站），所以必须先给用户看清楚会删几个、多大。
+    const attachBox = $('s-attach')
+    const attachBtn = $('s-attach-clean')
+    const fmtSize = function (n) {
+      const v = Number(n) || 0
+      if (v >= 1048576) return (v / 1048576).toFixed(1) + ' MB'
+      if (v >= 1024) return (v / 1024).toFixed(0) + ' KB'
+      return v + ' B'
+    }
+    const refreshAttachStat = function () {
+      if (!attachBox) return
+      try {
+        const api = win.__CMARK
+        const s = api && api.scanAttachments ? api.scanAttachments() : null
+        if (!s || !s.ok) {
+          attachBox.textContent = '附件：读取失败' + (s && s.message ? '（' + s.message + '）' : '')
+          return
+        }
+        const total = Number(s.total) || 0
+        const unused = (s.unused || []).length
+        attachBox.textContent =
+          '附件：' + total + ' 个，共 ' + fmtSize(s.allBytes) +
+          '；未引用 ' + unused + ' 个（' + fmtSize(s.unusedBytes) + '）'
+      } catch (e) {}
+    }
+    refreshAttachStat()
+    if (attachBtn) {
+      attachBtn.onclick = function () {
+        try {
+          const api = win.__CMARK
+          if (!api || !api.cleanAttachments) return toast('清理功能不可用', 'err')
+          const s = api.scanAttachments ? api.scanAttachments() : null
+          const n = s && s.ok ? (s.unused || []).length : 0
+          if (!n) return toast('没有未被引用的附件')
+          const msg =
+            '直接删除 ' + n + ' 个未被引用的附件（' + fmtSize(s.unusedBytes) + '）？\n' +
+            '删除后不可撤销；这些附件如果已经提交过，可以从 git 历史里找回。'
+          zgsConfirm(msg, '删除').then(function (ok) {
+            if (!ok) return
+            const r = api.cleanAttachments()
+            if (!r || !r.ok) return toast('清理失败：' + ((r && r.message) || '未知错误'), 'err')
+            toast('已删除 ' + (r.deleted || 0) + ' 个附件')
+            refreshAttachStat()
+          })
+        } catch (e) {
+          toast('清理失败：' + (e && e.message), 'err')
+        }
+      }
+    }
 
     const pickBtn = $('s-ws-pick')
     if (pickBtn) {

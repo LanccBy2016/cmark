@@ -398,7 +398,7 @@ window.__CMARK = {
    */
   loadAllNotes() {
     const out = []
-    const SKIP = new Set(['.git', '.cmark', 'node_modules', '.obsidian', '.trash', 'assets'])
+    const SKIP = new Set(['.git', '.cmark', 'node_modules', '.obsidian', 'assets'])
     const walk = (dirAbs, prefix, depth) => {
       if (depth > 12 || out.length > 8000) return
       let list
@@ -437,62 +437,6 @@ window.__CMARK = {
    * 走 shell.openExternal + file:// 而不是 shellOpenPath：后者会把插件窗口藏到后台。
    */
   /** 取 katex 样式文本：导出时公式排版全靠它，缺了上标会乱 */
-  /** 图片缩放比例的侧车文件路径（放在 .cmark 里，不进 markdown） */
-  _imgStylePath() {
-    try {
-      // 必须用笔记目录 workspace，不能用 _repoRoot()：
-      // 后者是 git 仓库根的判断结果，实测这套环境下它返回的是笔记目录的上一层
-      // （返回的是笔记目录的上一层而不是笔记目录），文件会写错地方。
-      const ws = workspace || (typeof config !== 'undefined' && config ? config.workspace : '')
-      if (!ws) return null
-      return path.join(ws, '.cmark', 'image-style.json')
-    } catch (e) {
-      return null
-    }
-  },
-
-  /**
-   * 读图片缩放表。
-   * 为什么不写进 markdown：markdown 没有图片尺寸语法，
-   * 唯一的做法是塞 HTML <img style="zoom:50%">，那会让源文件从
-   * ![alt](url) 变成一坨 HTML，Obsidian 里看着也难受。
-   * 尺寸本质上是个人阅读偏好，存仓库元数据更合适。
-   */
-  getImageStyles() {
-    try {
-      const f = this._imgStylePath()
-      if (!f || !fs.existsSync(f)) return {}
-      const raw = fs.readFileSync(f, 'utf-8')
-      const obj = JSON.parse(raw)
-      return obj && typeof obj === 'object' ? obj : {}
-    } catch (e) {
-      return {}
-    }
-  },
-
-  setImageStyle(url, zoom) {
-    try {
-      const f = this._imgStylePath()
-      if (!f || !url) return { ok: false, message: '未设置笔记目录' }
-      let all = {}
-      if (fs.existsSync(f)) {
-        try {
-          const raw = fs.readFileSync(f, 'utf-8')
-          all = JSON.parse(raw) || {}
-        } catch (e) {
-          all = {}
-        }
-      }
-      if (!zoom || zoom === '100%') delete all[url]
-      else all[url] = zoom
-      fs.mkdirSync(path.dirname(f), { recursive: true })
-      fs.writeFileSync(f, JSON.stringify(all, null, 2), 'utf-8')
-      return { ok: true }
-    } catch (e) {
-      return { ok: false, message: e.message }
-    }
-  },
-
   getKatexCss() {
     try {
       const dirs = [__dirname, path.join(__dirname, 'dist')]
@@ -852,34 +796,14 @@ window.__CMARK = {
     }
   },
 
-  /** 删除：进 .cmark/trash，不直接抹盘 */
+  /** 删除：直接从磁盘移除（不做回收站，误删靠 git 历史恢复） */
   deleteNode(rel) {
     try {
       const abs = this.absOf(rel)
       if (!fs.existsSync(abs)) return { ok: true }
-      // 回收站在仓库外（与 ndb 的 TRASH 同址）：放进 .cmark 会让 git 工作区多出未跟踪文件
-      const z = window.__ZNOTES
-      const trash = (z && z.metaTrashDir) || path.join(this.repoMetaDir(), 'trash')
-      fs.mkdirSync(trash, { recursive: true })
-      // 毫秒 + 随机：原来只到秒，同一秒删两篇同名笔记会互相覆盖
-      const stamp =
-        new Date().toISOString().replace(/[:.]/g, '-') +
-        '-' +
-        Math.random().toString(36).slice(2, 7)
-      const dest = path.join(trash, stamp + '__' + path.basename(abs))
-      // 笔记在 D 盘、元数据在 C 盘时 rename 会 EXDEV，跨盘要复制后删
-      try {
-        fs.renameSync(abs, dest)
-      } catch (e) {
-        if (e && e.code === 'EXDEV') {
-          fs.cpSync(abs, dest, { recursive: true })
-          fs.rmSync(abs, { recursive: true, force: true })
-        } else {
-          throw e
-        }
-      }
+      fs.rmSync(abs, { recursive: true, force: true })
       if (window.__ZNOTES && window.__ZNOTES.rescan) window.__ZNOTES.rescan()
-      return { ok: true, trashed: dest }
+      return { ok: true }
     } catch (e) {
       return { ok: false, message: e.message }
     }
@@ -1115,28 +1039,27 @@ window.__CMARK = {
     }
   },
 
-  /** 把未引用的附件移到 .cmark/trash/，不直接删，可回退 */
+  /** 清理未引用附件：直接删除。附件也在 git 里，删错了可从历史取回 */
   cleanAttachments() {
     try {
       const scan = this.scanAttachments()
       if (!scan.ok) return scan
-      if (!scan.unused.length) return { ok: true, moved: 0, bytes: 0 }
+      if (!scan.unused.length) return { ok: true, deleted: 0, moved: 0, bytes: 0 }
 
       const root = this._repoRoot()
       const attachDir = path.join(root, '.cmark', 'attachments')
-      const trashDir = path.join(root, '.cmark', 'trash', 'attachments-' + Date.now())
-      fs.mkdirSync(trashDir, { recursive: true })
 
-      let moved = 0
+      let deleted = 0
       let bytes = 0
       for (const it of scan.unused) {
         try {
-          fs.renameSync(path.join(attachDir, it.file), path.join(trashDir, it.file))
-          moved++
+          fs.unlinkSync(path.join(attachDir, it.file))
+          deleted++
           bytes += it.size
         } catch (e) {}
       }
-      return { ok: true, moved: moved, bytes: bytes, trashDir: trashDir }
+      // deleted 是新字段名，moved 留着兼容旧调用方
+      return { ok: true, deleted: deleted, moved: deleted, bytes: bytes }
     } catch (e) {
       return { ok: false, message: e.message }
     }

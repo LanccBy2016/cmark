@@ -59,6 +59,37 @@ const PH_TOC = '\uE00A'
 /** [[双链]] 的左右界 */
 const PH_WIKI_O = '\uE00B'
 const PH_WIKI_C = '\uE00C'
+/**
+ * <img ...> 的占位符。
+ * 必须抢在 remark 之前把它摘出来：@platejs/markdown 内置 remark-mdx，
+ * 碰到不带自闭合斜杠的 HTML 标签会直接抛 "Expected a closing tag"，
+ * 结果是整篇笔记打不开（不是丢格式，是打不开）。
+ * U+E010/E011 在 placeholderToMd 的清理区间（E000..E007）之外，绕行也安全。
+ */
+const PH_IMG_O = '\uE010'
+const PH_IMG_C = '\uE011'
+const PH_IMG_RE = new RegExp(PH_IMG_O + '([^' + PH_IMG_C + ']*)' + PH_IMG_C, 'g')
+
+type HtmlImgInfo = { url: string; alt: string; width?: number; widthPct?: string }
+
+/** 从一段 <img ...> 里取 src / alt / width（width 支持 320 与 50% 两种写法） */
+function parseImgTag(tag: string): HtmlImgInfo | null {
+  const attr = (name: string): string => {
+    const re = new RegExp('\\s' + name + '\\s*=\\s*(?:"([^"]*)"|\'([^\']*)\'|([^\\s>]+))', 'i')
+    const m = re.exec(tag)
+    if (!m) return ''
+    if (m[1] !== undefined) return m[1]
+    if (m[2] !== undefined) return m[2]
+    return m[3] || ''
+  }
+  const url = attr('src').trim()
+  if (!url) return null
+  const out: HtmlImgInfo = { url: url, alt: attr('alt') }
+  const w = attr('width').trim()
+  if (/^\d+(\.\d+)?$/.test(w)) out.width = Math.round(Number(w))
+  else if (/^\d+(\.\d+)?%$/.test(w)) out.widthPct = w
+  return out
+}
 const PH_RULES: Array<{ re: RegExp; field: MarkKey }> = [
   {
     re: new RegExp(PH[F_HL][0] + '([^' + PH[F_HL][1] + ']*)' + PH[F_HL][1], 'g'),
@@ -144,7 +175,9 @@ export function preDeserialize(md: string): string {
       // 内联 HTML 白名单：转成等价的 markdown / 已有 mark，否则 remark 会把它当纯文本
       // 打印出来，读起来就是一串尖括号。放在扩展语法替换之前，因为 sup/sub 会生成
       // ^ / ~，后面还要再走一次占位符保护。
+      // 先把 <img ...> 摘成占位符（见 PH_IMG_O 的说明），后面才轮到内联 HTML 白名单
       let out = seg
+        .replace(/<img\b[^>]*>/gi, (m) => PH_IMG_O + encodeURIComponent(m) + PH_IMG_C)
         .replace(/<kbd>([^<]*)<\/kbd>/gi, (_m, x) => '`' + x + '`')
         .replace(/<sup>([^<]*)<\/sup>/gi, (_m, x) => '^' + x + '^')
         .replace(/<sub>([^<]*)<\/sub>/gi, (_m, x) => '~' + x + '~')
@@ -299,7 +332,9 @@ export function postDeserialize<T>(nodes: T[]): T[] {
     if (merged.length === kids.length && merged.every((x, i) => x === kids[i])) return n
     return { ...n, children: merged }
   }
-  return cleaned.map(tidy).map(restoreSyntaxText) as unknown as T[]
+  const base = cleaned.map(tidy).map(restoreSyntaxText)
+  // 最后一步：把 <img ...> 占位符还原成真正的图片节点（否则编辑器里会显示一串乱码）
+  return restoreHtmlImgs(base) as unknown as T[]
 }
 
 function markLeafToPlaceholder(leaf: AnyNode): AnyNode {
@@ -385,4 +420,81 @@ export function placeholderToMd(md: string): string {
   out = out.replace(/&#x20;/g, ' ')
 
   return out.replace(/[\uE000-\uE007]/g, '')
+}
+
+/**
+ * 把 preDeserialize 摘出来的 <img ...> 占位符还原成图片节点。
+ *
+ * 为什么不在 deserialize 阶段交给 @platejs/markdown 的 rules：
+ * remark-mdx 会把 HTML 解析成 mdxJsxFlowElement，而 Plate 的序列化器不认这个节点，
+ * 保存时会整篇失败；而且不带自闭合斜杠的 <img> 在解析阶段就直接抛错。
+ * 所以先在字符串层摘掉，节点树成型后再补回来。
+ *
+ * 图片节点的形状要和 Plate 默认 img 规则产出一致（type=img、caption 存 alt、
+ * children 里放一个空 text），否则渲染器和后续序列化都认不出它。
+ */
+function restoreHtmlImgs(nodes: AnyNode[]): AnyNode[] {
+  if (!Array.isArray(nodes)) return nodes
+
+  const toImgNode = (enc: string): AnyNode | null => {
+    let tag = ''
+    try {
+      tag = decodeURIComponent(enc)
+    } catch (e) {
+      return null
+    }
+    const info = parseImgTag(tag)
+    if (!info) return null
+    const node: AnyNode = {
+      type: String(KEYS.img),
+      url: info.url,
+      caption: [{ text: info.alt || '' }],
+      children: [{ text: '' }],
+    }
+    if (info.width) node.width = info.width
+    if (info.widthPct) node.widthPct = info.widthPct
+    return node
+  }
+
+  const splitText = (leaf: AnyNode): AnyNode[] => {
+    const txt = typeof leaf.text === 'string' ? leaf.text : ''
+    if (!txt || txt.indexOf(PH_IMG_O) < 0) return [leaf]
+    const out: AnyNode[] = []
+    PH_IMG_RE.lastIndex = 0
+    let last = 0
+    let m: RegExpExecArray | null
+    while ((m = PH_IMG_RE.exec(txt))) {
+      if (m.index > last) out.push({ ...leaf, text: txt.slice(last, m.index) })
+      const img = toImgNode(m[1])
+      // 解析失败就保留原文，宁可显示难看的标签，也不能把内容吃掉
+      out.push(img || { ...leaf, text: m[0] })
+      last = m.index + m[0].length
+    }
+    if (last < txt.length) out.push({ ...leaf, text: txt.slice(last) })
+    return out.filter((x) => !(typeof x.text === 'string' && x.text === ''))
+  }
+
+  const walk = (n: AnyNode): AnyNode[] => {
+    if (typeof n.text === 'string') return splitText(n)
+    if (!Array.isArray(n.children)) return [n]
+    const kids: AnyNode[] = []
+    for (const c of n.children) kids.push(...walk(c))
+    return [{ ...n, children: kids }]
+  }
+
+  const out: AnyNode[] = []
+  for (const n of nodes) {
+    for (const x of walk(n)) {
+      // 整个段落只有一张图 → 直接把段落换成图片节点，别留一个空段落
+      if (x.type === String(KEYS.p) && Array.isArray(x.children)) {
+        const real = x.children.filter((c) => !(typeof c.text === 'string' && !c.text.trim()))
+        if (real.length === 1 && real[0] && real[0].type === String(KEYS.img)) {
+          out.push(real[0])
+          continue
+        }
+      }
+      out.push(x)
+    }
+  }
+  return out
 }

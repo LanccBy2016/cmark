@@ -7,7 +7,7 @@
  *   folder/<relpath>   ->  目录（扫描得出，children 内联）
  *   setting / rootsort / last_work_note/*  ->  <用户数据目录>/znotes-data/<hash>/meta/ui.json
  *   attachment/<digest> ->  <用户数据目录>/znotes-data/<hash>/assets/<digest>.<ext>
- * 删除进 <用户数据目录>/znotes-data/<hash>/meta/trash，不直接抹盘。
+ * 删除直接从磁盘移除（不做回收站，误删靠 git 历史恢复）。
  */
 const fs = require('fs')
 const os = require('os')
@@ -47,7 +47,7 @@ module.exports = function installNDB(win, externalCfg) {
   const STOREJSON = path.join(META, 'storage.json')
   // 仓库内的状态目录：排序、只读锁定、图片附件都放这里，随 git 一起提交。
   // 点开头 → 目录树扫描会跳过，不会显示成一本书；.gitignore 里也不要忽略它。
-  // （本机运行态仍然留在仓库外的 __META_ROOT：git 配置、界面偏好、回收站、备份、日志）
+  // （本机运行态仍然留在仓库外的 __META_ROOT：git 配置、界面偏好、备份、日志）
   // .cmark 是「仓库级」元数据（排序、只读标记、附件），放在仓库根而不是选中的子目录里：
   // 一是不污染笔记目录（比如 Obsidian 库的视图），二是同一个仓库下换子目录做工作区时
   // 元数据只有一份。没有 git 时仓库根就等于工作区本身。
@@ -66,7 +66,6 @@ module.exports = function installNDB(win, externalCfg) {
   const REPO_ROOT = detectRepoRoot(WS) || WS
   const REPO_META = path.join(REPO_ROOT, '.cmark')
   const ASSETS = path.join(REPO_META, 'attachments')
-  const TRASH = path.join(META, 'trash')
 
   const mk = (p) => { try { fs.mkdirSync(p, { recursive: true }) } catch (e) {} }
 
@@ -138,17 +137,7 @@ module.exports = function installNDB(win, externalCfg) {
     walk(newDirAbs, oldDirAbs)
   }
 
-  ;[META, REPO_META, ASSETS, TRASH].forEach(mk)
-
-  // 移到回收站：同盘直接 rename，跨盘（笔记在 D: 元数据在 C:）复制后删除
-  function moveToTrash(src, dst) {
-    try { fs.renameSync(src, dst); return true } catch (e) {}
-    try {
-      fs.cpSync(src, dst, { recursive: true })
-      fs.rmSync(src, { recursive: true, force: true })
-      return true
-    } catch (e2) { return false }
-  }
+  ;[META, REPO_META, ASSETS].forEach(mk)
 
   const rj = (p, d) => { try { return JSON.parse(fs.readFileSync(p, 'utf8')) } catch (e) { return d } }
   const wj = (p, v) => { mk(path.dirname(p)); fs.writeFileSync(p, JSON.stringify(v, null, 1), 'utf8') }
@@ -1194,13 +1183,9 @@ module.exports = function installNDB(win, externalCfg) {
         const rel = id.slice('note/'.length)
         const src = path.join(WS, rel)
         try {
-          if (fs.existsSync(src)) {
-            mk(TRASH)
-            const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-            const dst = path.join(TRASH, stamp + '__' + rel.replace(/\//g, '_'))
-            fs.copyFileSync(src, dst)
-            fs.unlinkSync(src)
-          }
+          // 直接删除，不保留副本：误删由 git 恢复（提交过的版本都在历史里）。
+          // 注意：新建成、还没被自动同步提交过的笔记删掉就找不回来了。
+          if (fs.existsSync(src)) fs.unlinkSync(src)
         } catch (e) {
           return { error: true, message: String(e && e.message) }
         }
@@ -1212,11 +1197,8 @@ module.exports = function installNDB(win, externalCfg) {
         const rel = id.slice('folder/'.length)
         const src = path.join(WS, rel)
         try {
-          if (fs.existsSync(src)) {
-            const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-            const dstDir = path.join(TRASH, stamp + '__dir_' + rel.replace(/\//g, '_'))
-            if (!moveToTrash(src, dstDir)) return { error: true, message: 'move to trash failed' }
-          }
+          // 同上：真删，不搬回收站
+          if (fs.existsSync(src)) fs.rmSync(src, { recursive: true, force: true })
         } catch (e) {
           return { error: true, message: String(e && e.message) }
         }
@@ -1392,8 +1374,6 @@ return out
     onboardGet: onboardGet,
     onboardSet: onboardSet,
     metaDir: META,
-    // 回收站：放在仓库外，避免删一篇笔记就在 git 工作区里多出未跟踪文件
-    metaTrashDir: TRASH,
     // 扫描是否因为目录/笔记过多而截断（界面据此提示用户换更具体的目录）
     truncated: () => LAST_TRUNCATED,
     // 只读状态：界面按 rel 询问，内部换算成 note/<rel> 的哈希

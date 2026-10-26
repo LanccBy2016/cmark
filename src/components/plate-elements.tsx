@@ -550,30 +550,38 @@ export function ImageElement({ attributes, children, element }: PlateElementProp
   const editor = useEditorRef()
   const locked = useNotes((s) => s.locked)
   const pathRef = useRef<number[] | null>(null)
-  const el = element as { url?: string; alt?: string; caption?: string }
-  // 缩放比例存在 .cmark/image-style.json，按图片相对路径索引。
-  // 100 表示原始大小（不写记录，保持文件干净）。
-  const [pct, setPct] = useState(100)
-  const imgUrl = el.url || ''
-  useEffect(() => {
-    try {
-      const all =
-        (window.__CMARK as unknown as { getImageStyles?: () => Record<string, string> })?.getImageStyles?.() || {}
-      const v = parseInt(String(all[imgUrl] || '100'), 10)
-      setPct(Number.isFinite(v) && v > 0 ? Math.min(100, Math.max(10, v)) : 100)
-    } catch (e) {}
-  }, [imgUrl])
+  const el = element as { url?: string; alt?: string; caption?: string; width?: unknown }
+  // 宽度写在节点自己身上（width，单位 px），序列化时会写成 <img ... width="320">。
+  // 这样 Obsidian / Typora / VS Code 打开同一份 md 也能看到一样的尺寸 ——
+  // 早期版本把缩放比例存在 .cmark/image-style.json 里，别的编辑器完全不认，等于白存。
+  const widthPx = (() => {
+    const w = Number(el.width)
+    return Number.isFinite(w) && w > 0 ? Math.round(w) : 0
+  })()
+  const imgRef = useRef<HTMLImageElement | null>(null)
+  // 拖动时先用本地状态出画面，避免等 React 状态树更新才跟手
+  const [dragW, setDragW] = useState<number | null>(null)
+  const [, setNatTick] = useState(0) // 图片加载完才知道原图宽度，用它触发一次重算
+  const shownW = dragW ?? widthPx
+  /** 当前显示宽度相对原图宽度的百分比；没设宽度就是 100 */
+  const pct = (() => {
+    const natW = imgRef.current?.naturalWidth || 0
+    if (!shownW || !natW) return 100
+    return Math.min(100, Math.max(10, Math.round((shownW / natW) * 100)))
+  })()
 
-  // 拖动时每移动一格都写盘会把磁盘刷爆，松手/停顿 300ms 后再落盘
+  // 拖滑杆时每移动一格都写节点会把序列化/保存刷爆，停顿 300ms 后再落盘
   const saveTimer = useRef<number | null>(null)
   const persistZoom = (v: number) => {
     if (saveTimer.current) window.clearTimeout(saveTimer.current)
     saveTimer.current = window.setTimeout(() => {
       try {
-        ;(window.__CMARK as unknown as { setImageStyle?: (u: string, z: string) => unknown })?.setImageStyle?.(
-          imgUrl,
-          v >= 100 ? '100%' : v + '%'
-        )
+        const p = findPathOf(editor, element)
+        if (!p) return
+        const natW = imgRef.current?.naturalWidth || 0
+        const tf = (editor as unknown as { tf?: { setNodes?: (props: Record<string, unknown>, o: unknown) => void } }).tf
+        if (v >= 100) tf?.setNodes?.({ width: null }, { at: p })
+        else if (natW > 0) tf?.setNodes?.({ width: Math.round((natW * v) / 100) }, { at: p })
       } catch (err) {
         console.error('[img-zoom]', err)
       }
@@ -619,11 +627,12 @@ export function ImageElement({ attributes, children, element }: PlateElementProp
     return raw.replace(/\//g, '\\')
   }
 
-  /** 拖动滑杆调比例：先改本地 state 立刻出画面，停顿后再落盘 */
+  /** 拖动滑杆调比例：先改本地 state 立刻出画面，停顿后再写回节点 */
   const onZoom = (ev: React.ChangeEvent<HTMLInputElement>) => {
     ev.stopPropagation()
     const v = Math.min(100, Math.max(10, Number(ev.target.value) || 100))
-    setPct(v)
+    const natW = imgRef.current?.naturalWidth || 0
+    setDragW(v >= 100 || !natW ? null : Math.max(1, Math.round((natW * v) / 100)))
     persistZoom(v)
   }
 
@@ -709,9 +718,11 @@ export function ImageElement({ attributes, children, element }: PlateElementProp
     <div {...attributes} className="block-img void-wrap" onClick={onImgGapClick}>
       <VoidGapBars />
       <img
+        ref={imgRef}
         src={src}
         alt={imgAlt}
-        style={pct < 100 ? { zoom: pct + '%' } : undefined}
+        style={shownW ? { width: shownW + 'px', maxWidth: '100%' } : undefined}
+        onLoad={() => setNatTick((t) => t + 1)}
         contentEditable={false}
         draggable={false}
         onClick={(ev) => {

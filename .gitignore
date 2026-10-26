@@ -12,3 +12,8 @@ SPEC.md
 EDITOR-SPEC.md
 待办与现状.md
 __probe_*.mjs
+
+# 离线安装包（.zpx/.zip 太大，只挂 GitHub Release，不入库）
+release/
+*.zpx
+.hermes-tmp.*

@@ -21,7 +21,6 @@ export interface OpResult {
   canceled?: boolean
   needReload?: boolean
   workspace?: string
-  trashed?: string
   mtime?: number
 }
 

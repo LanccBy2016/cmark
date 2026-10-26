@@ -143,6 +143,17 @@ module.exports = function installGitService(win, argvPath) {
   // 工作区元数据目录名（固定放在仓库根）
   const META_DIR = '.cmark'
 
+  // 仓库根的版本控制配置文件：不属于笔记内容，但由插件自己维护（initRepo 会写 .gitignore），
+  // 而它们住在仓库根。工作区是仓库的子目录时，若不显式纳入提交范围，
+  // 这些文件的改动永远进不了暂存区 —— 表现就是「改动面板里一直挂着、怎么提交都提交不掉」。
+  const ROOT_VCS = ['.gitignore', '.gitattributes']
+  function rootVcsPresent () {
+    if (!repoRoot) return []
+    return ROOT_VCS.filter((f) => {
+      try { return fs.existsSync(path.join(repoRoot, f)) } catch (e) { return false }
+    })
+  }
+
   function gitDir() {
     if (!repoRoot) return null
     const g = path.join(repoRoot, '.git')
@@ -541,7 +552,7 @@ module.exports = function installGitService(win, argvPath) {
     if (!pre.ok) return pre
     const safe = rel ? normRel(rel) : null
     if (rel && !safe) return { ok: false, kind: 'badrev', message: '路径不合法' }
-    return enqueue('stage', () => runGit(['add', '-A', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel] : ['.'])), { label: 'add' }))
+    return enqueue('stage', () => runGit(['add', '-A', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel, META_DIR].concat(rootVcsPresent()) : ['.'])), { label: 'add' }))
   }
 
   async function unstage(rel) {
@@ -550,9 +561,9 @@ module.exports = function installGitService(win, argvPath) {
     const safe = rel ? normRel(rel) : null
     if (rel && !safe) return { ok: false, kind: 'badrev', message: '路径不合法' }
     return enqueue('unstage', async () => {
-      const r = await runGit(['restore', '--staged', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel] : ['.'])), { label: 'unstage' })
+      const r = await runGit(['restore', '--staged', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel, META_DIR].concat(rootVcsPresent()) : ['.'])), { label: 'unstage' })
       if (r.ok) return r
-      return runGit(['reset', 'HEAD', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel] : ['.'])), { label: 'unstage-reset' })
+      return runGit(['reset', 'HEAD', '--'].concat(safe ? [safe] : (scopeRel ? [scopeRel, META_DIR].concat(rootVcsPresent()) : ['.'])), { label: 'unstage-reset' })
     })
   }
 
@@ -664,7 +675,9 @@ module.exports = function installGitService(win, argvPath) {
     // 非空则只提交工作区内的改动，避免把仓库根部的无关文件一起带上。
     // 例外：.cmark 是工作区元数据（排序/只读状态/附件），固定住在仓库根，
     // 工作区是仓库的子目录时必须显式带上，否则 tree-order.json 这类改动永远提交不进去。
-    const scope = scopeRel ? [scopeRel, META_DIR] : []
+    // 例外二：仓库根的 .gitignore / .gitattributes（插件维护的版本控制配置）同理，
+    // 不带上的话它们会永远留在「未提交改动」里。
+    const scope = scopeRel ? [scopeRel, META_DIR].concat(rootVcsPresent()) : []
     const scopeArgs = scope.length ? ['--'].concat(scope) : []
     const addArgs = ['add', '-A'].concat(scopeArgs)
     const add = await runGit(addArgs, { label: 'add' })
@@ -1054,7 +1067,7 @@ module.exports = function installGitService(win, argvPath) {
         return out
       }
       const entries = fs.readdirSync(WS, { withFileTypes: true })
-      const PLUGIN_OWNED = ['.cmark', '.attachments', 'trash', 'backup']
+      const PLUGIN_OWNED = ['.cmark', '.attachments', 'backup']
       for (const e of entries) {
         if (e.name === '.git') { out.blocking.push('.git'); continue }
         if (PLUGIN_OWNED.indexOf(e.name) >= 0) { out.keepable.push(e.name); continue }
@@ -1088,9 +1101,9 @@ module.exports = function installGitService(win, argvPath) {
     const keepable = []     // 自动生成的示例笔记：备份后清掉
     const blocking = []     // 用户内容：直接拒绝
     // 插件自己生成的目录不算用户内容：.cmark（排序/只读/附件）、.attachments（旧版附件）、
-    // trash/backup（本机回收站与备份）。选文件夹时插件就会建 .cmark，
+    // backup（改动前的自动备份）。选文件夹时插件就会建 .cmark，
     // 若不剔除，用户刚选完目录再想接入远程仓库就永远被判定"非空"。
-    const PLUGIN_OWNED = ['.cmark', '.attachments', 'trash', 'backup']
+    const PLUGIN_OWNED = ['.cmark', '.attachments', 'backup']
     for (const e of entries) {
       if (e.name === '.git') { blocking.push('.git'); continue }
       if (PLUGIN_OWNED.indexOf(e.name) >= 0) { keepable.push(e.name); continue }
