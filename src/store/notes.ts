@@ -80,6 +80,8 @@ interface NoteState {
   ) => void
   toggleLocked: () => void
   toggleNear: () => void
+  /** 启动时校准已注册的「全局搜索指令」：修正旧版本写坏的 icon 路径（缺扩展名会 404） */
+  syncNearFeatures: () => void
   toggleToolbar: () => void
   toggleSourceMode: () => void
   setBodyFontSize: (v: number) => void
@@ -390,13 +392,43 @@ export const useNotes = create<NoteState>((set, get) => ({
       }
       const code = 'note/' + currentRel
       if (next) {
-        z?.setFeature?.({ code, icon: 'logo', explain: '打开笔记「' + title + '」', cmds: [title] })
+        // icon 必须带扩展名：ZTools 会把相对路径拼成 <插件目录>/<icon>，
+        // 写成 'logo' 得到 ...cmark-1.1.0.asar/logo（文件不存在），列表里就是破图
+        z?.setFeature?.({ code, icon: 'logo.png', explain: '打开笔记「' + title + '」', cmds: [title] })
       } else {
         z?.removeFeature?.(code)
       }
     } catch (e) {}
     set({ near: next })
     setMessage(next ? '已设为全局搜索：「' + title + '」' : '已取消全局搜索', 2400)
+  },
+
+  /**
+   * 启动时校准「全局搜索指令」。
+   *
+   * 旧版本把动态指令的 icon 写成 'logo'（没有扩展名），ZTools 拼出来的地址是
+   * …/cmark-x.y.z.asar/logo，文件不存在 —— 在「快捷键 → 目标指令」这类列表里就是破图。
+   * 注册记录存在 ZTools 的 LMDB 里，只改代码不会更新它，所以每次启动按 near.txt
+   * 重新 setFeature 一遍（同 code 会覆盖），把老记录纠正过来。
+   */
+  syncNearFeatures() {
+    try {
+      // allDocs 在 __NDB（数据层）上，不在 __ZNOTES；readNoteState 反过来在 __ZNOTES 上。
+      // 这两个混用会静默失效（可选链吞掉 undefined），踩过一次。
+      const D = window.__NDB as unknown as { allDocs?: (s?: string) => Array<{ _id?: string }> } | undefined
+      const Z = window.__ZNOTES as unknown as { readNoteState?: (rel: string) => { near?: boolean } } | undefined
+      const z = window.ztools as unknown as { setFeature?: (o: unknown) => void } | undefined
+      if (!D?.allDocs || !z?.setFeature) return
+      const docs = D.allDocs('note/') || []
+      for (const doc of docs) {
+        const id = String(doc?._id || '')
+        if (!id.startsWith('note/')) continue
+        const rel = id.slice('note/'.length)
+        if (!Z?.readNoteState?.(rel)?.near) continue
+        const title = rel.split('/').pop()!.replace(/\.(md|markdown)$/i, '')
+        z.setFeature({ code: id, icon: 'logo.png', explain: '打开笔记「' + title + '」', cmds: [title] })
+      }
+    } catch (e) {}
   },
 
   setAiOpen(v) {

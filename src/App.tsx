@@ -230,6 +230,19 @@ export default function App() {
     buildIndex()
   }, [buildIndex])
 
+  // 校准「全局搜索指令」的图标：旧版本注册动态指令时把 icon 写成 'logo'（缺扩展名），
+  // ZTools 拼出来是 .../cmark-x.y.z.asar/logo，文件不存在 —— 目标指令列表里就是破图。
+  // 注册记录在 ZTools 的库里，改代码不会自动更新，所以每次启动按 near.txt 重注册一遍。
+  // 延时是因为要先等 ndb 扫描完成，否则 readNoteState 拿不到 near 标记。
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      try {
+        useNotes.getState().syncNearFeatures()
+      } catch (e) {}
+    }, 2500)
+    return () => window.clearTimeout(t)
+  }, [])
+
   // 字数：中文按字、英文按词，代码块不计
 
   // 字号档位挂到根节点，CSS 用变量控制
