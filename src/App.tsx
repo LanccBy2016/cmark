@@ -155,12 +155,44 @@ export default function App() {
       tick()
     }
 
+    /**
+     * 进入参数的形状（宿主实测）：
+     *   { code: 'note/宏辉/City.md' | 'cmark', type: 'text', payload: '用户输入', inputState: {...} }
+     *
+     * 「设为全局搜索」注册的动态指令，code 就是 note/<rel>，此时必须直接把那篇笔记打开，
+     * 否则点了指令只是把面板唤起来、停在上次那篇上，看着像没反应。
+     * 普通指令（cmark / markdown / md / cm）仍走原来的 refocus。
+     */
+    const openNoteByFeature = (rel: string) => {
+      try {
+        useNotes.getState().openNote(rel)
+      } catch (e) {}
+      // 刚启动时 ndb 可能还没扫完，一次重试兜底
+      window.setTimeout(() => {
+        try {
+          if (useNotes.getState().currentRel !== rel) useNotes.getState().openNote(rel)
+        } catch (e) {}
+      }, 400)
+    }
+
+    const onEnter = (enter?: { code?: string }) => {
+      const code = String(enter?.code || '')
+      if (code.startsWith('note/')) {
+        const rel = code.slice('note/'.length)
+        if (rel) {
+          openNoteByFeature(rel)
+          return
+        }
+      }
+      refocus()
+    }
+
     let offEnter: (() => void) | undefined
     try {
       const zz = window as unknown as {
-        ztools?: { onPluginEnter?: (cb: () => void) => (() => void) | void }
+        ztools?: { onPluginEnter?: (cb: (enter?: { code?: string }) => void) => (() => void) | void }
       }
-      offEnter = zz.ztools?.onPluginEnter?.(refocus) || undefined
+      offEnter = zz.ztools?.onPluginEnter?.(onEnter) || undefined
     } catch (e) {}
 
     return () => {
