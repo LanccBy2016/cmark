@@ -2,12 +2,18 @@
   "name": "cmark",
   "version": "1.2.0",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "adapters/*"
+  ],
   "type": "module",
   "description": "CMark —— 本地 Markdown 笔记，用 git 同步",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "test:core": "vitest run --root packages/core",
+    "typecheck:core": "tsc -p packages/core/tsconfig.json --noEmit",
     "pack": "node scripts/pack.mjs",
     "pack:npm": "node scripts/prepare-npm.mjs",
     "pack:upx": "node scripts/pack-upx.mjs"
@@ -45,11 +51,12 @@
     "zustand": "^5.0.3"
   },
   "devDependencies": {
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5",
     "@types/dompurify": "^3.0.5",
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
-    "typescript": "^5.7.3",
     "vite": "^6.0.11"
   },
   "license": "MIT",

@@ -1,0 +1,14 @@
+{
+  "name": "@cmark/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build:win": "tauri build --target x86_64-pc-windows-msvc",
+    "build:mac": "tauri build --target aarch64-apple-darwin",
+    "build:mac-intel": "tauri build --target x86_64-apple-darwin"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  }
+}

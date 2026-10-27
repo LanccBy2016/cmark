@@ -1,0 +1,29 @@
+[package]
+name = "cmark-desktop"
+version = "0.1.0"
+edition = "2021"
+description = "CMark —— 本地 Markdown 笔记"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# 走 Rust 快路径时才需要（大仓库时按仓库体积切到它，见 MIGRATION.md）
+git2 = { version = "0.19", optional = true }
+
+[features]
+default = []
+fast-git = ["dep:git2"]
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
