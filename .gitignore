@@ -17,3 +17,7 @@ __probe_*.mjs
 release/
 *.zpx
 .hermes-tmp.*
+
+# npm 发布临时目录（scripts/prepare-npm.mjs 的产物）
+.npm-publish/
+*.tgz

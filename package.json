@@ -1,13 +1,15 @@
 {
   "name": "cmark",
   "version": "1.1.0",
+  "private": true,
   "type": "module",
   "description": "CMark —— 本地 Markdown 笔记，用 git 同步",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "pack": "node scripts/pack.mjs"
+    "pack": "node scripts/pack.mjs",
+    "pack:npm": "node scripts/prepare-npm.mjs"
   },
   "dependencies": {
     "@platejs/basic-nodes": "^53.0.0",

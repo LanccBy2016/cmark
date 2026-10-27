@@ -1,0 +1,71 @@
+name: publish-npm
+
+# 打 tag（v1.1.0）或手动触发时：构建 -> 组装 npm 发布目录 -> 发布到 npm
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 只构建并打包，不发布
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  # Trusted Publishing（OIDC）与 provenance 都需要 id-token
+  id-token: write
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      # npm 包名（ZTools「从 npm 安装」里填的名字）
+      NPM_PACKAGE_NAME: '@lancc/cmark'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # Trusted Publishing 要求 npm CLI >= 11.5.1，node 22 自带的 10.x 不够
+      - name: 升级 npm
+        run: npm install -g npm@latest
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建
+        run: npm run build
+
+      - name: 复制 plugin.json / preload / logo 到 app
+        run: node scripts/pack.mjs
+
+      - name: 校验 tag 与版本一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          ver=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$ver" ]; then
+            echo "::error::tag v$tag 与 package.json version $ver 不一致"
+            exit 1
+          fi
+
+      - name: 组装 npm 发布目录
+        run: node scripts/prepare-npm.mjs --out .npm-publish
+
+      - name: npm pack 自检
+        working-directory: .npm-publish
+        run: npm pack --dry-run
+
+      - name: 发布到 npm（OIDC + provenance）
+        if: github.event_name == 'push' || inputs.dry_run == false
+        working-directory: .npm-publish
+        run: npm publish --provenance --access public
