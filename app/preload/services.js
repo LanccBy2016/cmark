@@ -43,6 +43,8 @@ function ensureDir(dir) {
   return dir
 }
 
+
+const { exportDocCss } = require('./export-css')
 function attachmentCacheDir(win) {
   const base = path.join(win.ztools.getPath('temp') || os.tmpdir(), 'cmark.attachments')
   return ensureDir(base)
@@ -286,7 +288,7 @@ module.exports = function installServices(win) {
     },
 
     /** 导出 HTML：套一层文档壳，样式内联 */
-    writeHtmlFile(dir, name, html, attachmentPaths, withKatex) {
+    writeHtmlFile(dir, name, html, attachmentPaths, withKatex, selfContained, theme) {
       const base = safeName(name, Date.now())
       const katexCss = withKatex
         ? '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">'
@@ -300,16 +302,7 @@ module.exports = function installServices(win) {
         '<title>' + base + '</title>',
         katexCss,
         '<style>',
-        'body{margin:0;background:#fff;color:#24292f;font:16px/1.7 -apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif}',
-        '.markdown-body{box-sizing:border-box;max-width:980px;margin:0 auto;padding:45px}',
-        '@media (max-width:767px){.markdown-body{padding:16px}}',
-        '.markdown-body h1,.markdown-body h2{border-bottom:1px solid #eaecef;padding-bottom:.3em}',
-        '.markdown-body code{background:#f6f8fa;border-radius:4px;padding:.2em .4em;font-size:.9em}',
-        '.markdown-body pre{background:#f6f8fa;border-radius:8px;padding:14px;overflow:auto}',
-        '.markdown-body pre code{background:none;padding:0}',
-        '.markdown-body blockquote{margin:0;padding:0 1em;color:#57606a;border-left:.25em solid #d0d7de}',
-        '.markdown-body table{border-collapse:collapse}.markdown-body th,.markdown-body td{border:1px solid #d0d7de;padding:6px 12px}',
-        '.markdown-body img{max-width:100%}',
+        exportDocCss(theme),
         '</style>',
         '</head>',
         '<body><article class="markdown-body">',
@@ -339,7 +332,7 @@ module.exports = function installServices(win) {
      * 导出 PDF / 图片：开隐藏窗口渲染 HTML，再抓图或打印
      * type: 'pdf' | 'image'
      */
-    exportFile(type, html, extraCss, cb, outDir) {
+    exportFile(type, html, extraCss, cb, outDir, theme) {
       const done = typeof cb === 'function' ? cb : () => {}
       if (!win.ztools.createBrowserWindow) {
         done(new Error('当前平台不支持静默渲染，请改用导出 HTML'))
@@ -349,9 +342,7 @@ module.exports = function installServices(win) {
         '<!doctype html><html><head><meta charset="utf-8"/>',
         '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">',
         '<style>',
-        'html,body{margin:0;padding:0;background:#fff}',
-        '.markdown-body{box-sizing:border-box;max-width:980px;margin:0 auto;padding:45px;',
-        'color:#24292f;font:16px/1.7 -apple-system,"Segoe UI",system-ui,"Microsoft YaHei",sans-serif}',
+        exportDocCss(theme),
         extraCss || '',
         '</style></head><body><article class="markdown-body"></article></body></html>',
       ].join('\n')

@@ -22,6 +22,11 @@ export default function App() {
 
 
 
+  // 主题兜底：preload 在 document-start 写 data-theme，重载时可能早于 <html> 创建
+  useEffect(() => {
+    try { (window as unknown as { __CMARK_THEME?: { apply?: () => void } }).__CMARK_THEME?.apply?.() } catch (e) {}
+  }, [])
+
   // Git 面板未初始化仓库时点「打开设置」：先收起 git 面板再开设置
   useEffect(() => {
     const h = () => {
@@ -285,17 +290,35 @@ export default function App() {
     } catch (e) {}
   }, [bodyFontSize])
 
+  /**
+   * 面板由 preload 注入（git-panel.js / settings-panel.js）。
+   * 万一某个模块在宿主里挂载失败，这里必须给出可见原因，不能点了没反应。
+   */
+  const reportPanelFail = useCallback((name: string) => {
+    let detail = ''
+    try {
+      const errs = (window as unknown as { __CMARK_BOOT_ERRORS?: string[] }).__CMARK_BOOT_ERRORS
+      if (Array.isArray(errs) && errs.length) detail = '：' + String(errs[0]).split('\n')[0].slice(0, 120)
+      else detail = '（控制台可查 window.__CMARK_BOOT_ERRORS）'
+    } catch (e) {}
+    try {
+      useNotes.getState().setMessage(name + ' 没有加载成功' + detail, 8000)
+    } catch (e) {}
+  }, [])
+
   /** 打开 V1.0.0 原版 git 面板（global = 工作区 / file = 当前笔记） */
   const openGit = useCallback((mode: 'global' | 'file') => {
     const fn = (window as unknown as { __zgpToggle?: (m: string) => void }).__zgpToggle
-    if (fn) fn(mode)
-  }, [])
+    if (typeof fn === 'function') { fn(mode); return }
+    reportPanelFail('Git 面板')
+  }, [reportPanelFail])
 
   /** 打开 V1.0.0 原版设置面板 */
   const openSettings = useCallback(() => {
     const fn = (window as unknown as { __zgsToggle?: () => void }).__zgsToggle
-    if (fn) fn()
-  }, [])
+    if (typeof fn === 'function') { fn(); return }
+    reportPanelFail('设置面板')
+  }, [reportPanelFail])
 
   /** 给 preload 里的原版模块提供宿主钩子 */
   useEffect(() => {
@@ -379,9 +402,10 @@ export default function App() {
               title={sourceMode ? '源码模式（点击回到富文本）' : '源码模式（直接编辑 Markdown）'}
               onClick={toggleSourceMode}
             >
-              <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5.4 4.4 2.2 8l3.2 3.6" />
-                <path d="M10.6 4.4 13.8 8l-3.2 3.6" />
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m18 16 4-4-4-4" />
+                <path d="m6 8-4 4 4 4" />
+                <path d="m14.5 4-5 16" />
               </svg>
             </button>
             <MoreMenu />

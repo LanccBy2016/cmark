@@ -28,6 +28,16 @@ type GitApi = {
 
 const git = () => window.__znotesGit as unknown as GitApi | undefined
 
+/** Git 集成是否开启：优先读 preload 的配置接口，回退 localStorage，都没值按开启处理 */
+function readGitEnabled(): boolean {
+  try {
+    const api = (window as unknown as { __CMARK_GIT?: { get?: () => boolean | null } }).__CMARK_GIT
+    const v = api?.get?.()
+    if (v === true || v === false) return v
+  } catch (e) {}
+  try { return localStorage.getItem('cmark-git-enabled') !== '0' } catch (e) { return true }
+}
+
 /** 工作区相对 → 仓库相对 */
 function repoRelOf(rel: string): string | null {
   try {
@@ -42,6 +52,18 @@ export function PushStatus({ onOpen }: { onOpen: () => void }) {
   const currentRel = useNotes((s) => s.currentRel)
   const [hasRemote, setHasRemote] = useState(false)
   const [pending, setPending] = useState(false)
+  const [gitOn, setGitOn] = useState(readGitEnabled)
+
+  // 设置里关掉 Git 集成时，这个云端按钮直接不显示
+  useEffect(() => {
+    const sync = () => setGitOn(readGitEnabled())
+    window.addEventListener('cmark-git-changed', sync)
+    document.addEventListener('visibilitychange', sync)
+    return () => {
+      window.removeEventListener('cmark-git-changed', sync)
+      document.removeEventListener('visibilitychange', sync)
+    }
+  }, [])
 
   const poll = useCallback(async () => {
     const G = git()
@@ -70,6 +92,7 @@ export function PushStatus({ onOpen }: { onOpen: () => void }) {
     return () => window.clearInterval(iv)
   }, [poll])
 
+  if (!gitOn) return null
   if (!currentRel) return null
 
   const warn = hasRemote && pending

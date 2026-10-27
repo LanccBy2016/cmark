@@ -25,8 +25,10 @@ module.exports = function installBranchBar (win) {
   var busy = false
 
   function $(id) { return doc.getElementById(id) }
+  // 不再发 Windows 系统通知（成功失败都打扰）。这条旧版分支条已由 React 版
+  // BranchBar.tsx 取代，这里保留空实现只为不破坏内部调用点。
   function toast (text) {
-    try { win.ztools.showNotification(text) } catch (e) {}
+    void text
   }
 
   function injectCss () {
@@ -35,7 +37,7 @@ module.exports = function installBranchBar (win) {
       '.sidebar-body{padding-top:36px !important;}',
       '#' + ROOT + '{position:absolute;top:0;left:0;right:0;height:36px;z-index:6;display:flex;align-items:center;gap:4px;',
       '  padding:0 8px;box-sizing:border-box;--bfg:#1f2328;--bbd:#e2e6eb;--bsoft:#f4f6f8;--bsub:#7b838d;}',
-      '@media (prefers-color-scheme:dark){#' + ROOT + '{--bfg:#e6e9ee;--bbd:#3a4149;--bsoft:#2a2f35;--bsub:#8b939e;}}',
+      ":root[data-theme='dark'] #" + ROOT + '{--bfg:#e6edf3;--bbd:#30363d;--bsoft:#22272e;--bsub:#8b949e;}',
       '#' + ROOT + ' .zbb-branch{flex:1;min-width:0;display:flex;align-items:center;gap:5px;height:26px;padding:0 7px;',
       '  border:1px solid var(--bbd);border-radius:7px;background:transparent;color:var(--bfg);font-size:12px;cursor:pointer;',
       '  font-family:inherit;transition:background .14s,border-color .14s;}',
@@ -48,6 +50,10 @@ module.exports = function installBranchBar (win) {
       '  border:1px solid var(--bbd);border-radius:7px;background:transparent;color:var(--bfg);cursor:pointer;opacity:.8;',
       '  transition:background .14s,opacity .14s;}',
       '#' + ROOT + ' .zbb-btn:hover{background:var(--bsoft);opacity:1;}',
+      '#' + ROOT + '.is-off{opacity:.45;filter:grayscale(1);}',
+      '#' + ROOT + '.is-off > *{pointer-events:none;}',
+      '#zbb-lock{position:absolute;top:0;left:0;right:0;height:36px;z-index:7;display:none;cursor:not-allowed;}',
+      '#zbb-lock.on{display:block;}',
       '#' + ROOT + ' .zbb-btn:disabled{opacity:.35;cursor:default;}',
       '#' + ROOT + ' .zbb-btn.busy svg{animation:zbb-spin 1s linear infinite;}',
       '@keyframes zbb-spin{to{transform:rotate(360deg)}}'
@@ -63,6 +69,24 @@ module.exports = function installBranchBar (win) {
     pull: '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 1.5a.75.75 0 0 1 .75.75v6.94l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V2.25A.75.75 0 0 1 8 1.5zM2.5 12.5a.75.75 0 0 1 .75.75v.25h9.5v-.25a.75.75 0 0 1 1.5 0v1a.75.75 0 0 1-.75.75H2.5a.75.75 0 0 1-.75-.75v-1a.75.75 0 0 1 .75-.75z"/></svg>',
     push: '<svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 14.5a.75.75 0 0 1-.75-.75V6.81L5.03 9.03a.75.75 0 0 1-1.06-1.06l3.5-3.5a.75.75 0 0 1 1.06 0l3.5 3.5a.75.75 0 1 1-1.06 1.06L8.75 6.81v6.94a.75.75 0 0 1-.75.75zM2.5 2.5a.75.75 0 0 1 .75-.75h9.5a.75.75 0 0 1 .75.75v1a.75.75 0 0 1-1.5 0v-.25h-9.5v.25a.75.75 0 0 1-1.5 0v-1z"/></svg>',
     sync: '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74A7.93 7.93 0 0 0 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>'
+  }
+
+  function gitEnabled () {
+    // 优先用 preload 的配置接口（file:// 下 localStorage 可能不可用）
+    try {
+      const v = win.__CMARK_GIT && win.__CMARK_GIT.get ? win.__CMARK_GIT.get() : undefined
+      if (v === true || v === false) return v
+    } catch (e) {}
+    try { return win.localStorage.getItem('cmark-git-enabled') !== '0' } catch (e) { return true }
+  }
+
+  function applyGitGate () {
+    var root = doc.getElementById(ROOT)
+    if (!root) return
+    var on = gitEnabled()
+    root.classList.toggle('is-off', !on)
+    var lock = doc.getElementById('zbb-lock')
+    if (lock) lock.classList.toggle('on', !on)
   }
 
   function mount () {
@@ -83,6 +107,12 @@ module.exports = function installBranchBar (win) {
       '<button class="zbb-btn" type="button" id="zbb-sync" title="同步（拉取然后推送）">' + ICON.sync + '</button>'
     ].join('')
     sb.insertBefore(root, sb.firstChild)
+    // Git 集成关掉时整条操作栏置灰、不可点，用覆盖层给出悬浮提示
+    var lock = doc.createElement('div')
+    lock.id = 'zbb-lock'
+    lock.title = '请在设置中开启 Git 集成'
+    sb.insertBefore(lock, root.nextSibling)
+    applyGitGate()
 
     // 左边按钮 = 打开「工作区变更记录」面板
     $('zbb-open').onclick = function () {
@@ -148,6 +178,18 @@ module.exports = function installBranchBar (win) {
       toast('操作失败：' + (e.message || ''))
     })
   }
+
+  // 供变更面板在 push/pull/sync 之后主动刷新顶部分支与脏标记，
+  // 否则要等下一次轮询（约 3 秒）才更新
+  try { win.__zbbRefresh = function () { try { refreshState(false) } catch (e) {} } } catch (e) {}
+
+  // 设置里切换 Git 集成、或窗口重新可见时，同步整条操作栏的可用状态
+  try { win.addEventListener('cmark-git-changed', applyGitGate) } catch (e) {}
+  try {
+    doc.addEventListener('visibilitychange', function () {
+      if (doc.visibilityState === 'visible') applyGitGate()
+    })
+  } catch (e) {}
 
   if (!mount()) {
     var tries = 0

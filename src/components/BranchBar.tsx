@@ -7,6 +7,7 @@
  * 因为笔记场景不需要分支工作流（这是 V1.0.0 定下的取舍）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 type GitState = { ok?: boolean; data?: { branch?: string; isRepo?: boolean; dirty?: number; ahead?: number; behind?: number } }
 type GitResult = { ok?: boolean; message?: string; data?: { local?: boolean } }
@@ -78,6 +79,8 @@ export function BranchBar({ onOpenPanel }: { onOpenPanel: () => void }) {
     }
   }, [refresh])
 
+  const { hint, show: showHint } = useHint()
+
   const run = useCallback(
     async (kind: 'pull' | 'push' | 'sync') => {
       const G = git()
@@ -90,18 +93,18 @@ export function BranchBar({ onOpenPanel }: { onOpenPanel: () => void }) {
         const fail = kind === 'pull' ? '拉取失败：' : kind === 'push' ? '推送失败：' : '同步失败：'
         if (r && r.ok) {
 const msg = kind === 'sync' && r.data?.local ? '已提交到本机（未配置远程仓库）' : done
-          toast(msg)
+          showHint(msg, false)
         } else {
-          toast(fail + ((r && r.message) || '未知原因'))
+          showHint(fail + ((r && r.message) || '未知原因'), true)
         }
       } catch (e) {
-        toast('操作失败：' + ((e as Error)?.message || ''))
+        showHint('操作失败：' + ((e as Error)?.message || ''), true)
       } finally {
         setBusy(null)
         void refresh()
       }
     },
-    [refresh]
+    [refresh, showHint]
   )
 
   const title = isRepo
@@ -109,6 +112,7 @@ const msg = kind === 'sync' && r.data?.local ? '已提交到本机（未配置�
     : '这个文件夹还不是 git 仓库，点击查看'
 
   return (
+    <>
     <div className="branch-bar">
       <button className="zbb-branch" type="button" title={title} onClick={onOpenPanel}>
         {ICON.branch}
@@ -143,12 +147,27 @@ const msg = kind === 'sync' && r.data?.local ? '已提交到本机（未配置�
         {ICON.sync}
       </button>
     </div>
+    {hint ? createPortal(
+      <div className={'app-toast' + (hint.err ? ' err' : '')}>{hint.text}</div>,
+      document.body
+    ) : null}
+    </>
   )
 }
 
-function toast(text: string) {
-  try {
-    const z = window.ztools as unknown as { showNotification?: (s: string) => void } | undefined
-    if (z?.showNotification) z.showNotification(text)
-  } catch (e) {}
+/**
+ * 拉取/推送/同步的反馈统一走插件内的底部小浮窗，不再调 window.ztools.showNotification。
+ * 系统通知会在 Windows 右下角弹窗，成功失败都打扰；这里改成和 Git 面板一致的
+ * 底部居中胶囊，2.6 秒自动消失。
+ */
+function useHint() {
+  const [hint, setHint] = useState<{ text: string; err?: boolean } | null>(null)
+  const timer = useRef<number | null>(null)
+  const show = useCallback((text: string, err?: boolean) => {
+    setHint({ text, err })
+    if (timer.current) window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setHint(null), 2600)
+  }, [])
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
+  return { hint, show }
 }

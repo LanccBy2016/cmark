@@ -42,8 +42,7 @@ module.exports = function installGitPanel(win, WS) {
     --zgp-hunk:#ddf4ff; --zgp-hunk-fg:#0969da;
     --zgp-shadow:0 8px 32px rgba(31,35,40,.14),0 2px 8px rgba(31,35,40,.08);
   }
-  @media (prefers-color-scheme:dark){
-    :root{
+  :root[data-theme='dark']{
       --zgp-bg:#161b22; --zgp-bg2:#1c2128; --zgp-bg3:#22272e;
       --zgp-fg:#e6edf3; --zgp-fg2:#9aa4b2; --zgp-fg3:#6e7681;
       --zgp-bd:#30363d; --zgp-bd2:#3d444d;
@@ -53,7 +52,6 @@ module.exports = function installGitPanel(win, WS) {
       --zgp-del:#2d1214; --zgp-del-fg:#f85149;
       --zgp-hunk:#0c2d4a; --zgp-hunk-fg:#58a6ff;
       --zgp-shadow:0 8px 32px rgba(0,0,0,.6),0 2px 8px rgba(0,0,0,.4);
-    }
   }
   #zgp-btn{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;padding:3px 10px;
     border:1px solid var(--zgp-bd2);border-radius:6px;background:var(--zgp-bg);color:var(--zgp-fg2);
@@ -128,7 +126,7 @@ module.exports = function installGitPanel(win, WS) {
   .zgp-st.D{background:var(--zgp-del);color:var(--zgp-del-fg);}
   .zgp-st.Q{background:var(--zgp-bg3);color:var(--zgp-fg3);}
   .zgp-st.U{background:var(--zgp-del);color:var(--zgp-del-fg);}
-  @media (prefers-color-scheme:dark){.zgp-st.M{background:#3a2d00;color:#d29922;}}
+  :root[data-theme='dark'] .zgp-st.M{background:#3a2d00;color:#d29922;}
   .zgp-fp{flex:1;min-width:0;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     font-family:Consolas,Menlo,monospace;}
   .zgp-fp span{unicode-bidi:normal;}
@@ -219,7 +217,8 @@ module.exports = function installGitPanel(win, WS) {
   .zgp-jumpbar button{padding:3px 10px;font-size:11.5px;border-radius:6px;cursor:pointer;
     border:1px solid var(--zgp-bd2);background:var(--zgp-bg);color:var(--zgp-fg2);}
   .zgp-jumpbar button:hover{background:var(--zgp-acc-bg);border-color:var(--zgp-acc);color:var(--zgp-acc);}
-  .zgp-dl.zgp-flash{outline:2px solid var(--zgp-acc);outline-offset:-2px;}
+  .zgp-dl.zgp-flash{outline:none !important;border:none !important;background:rgba(9,105,218,.16) !important;}
+  :root[data-theme='dark'] .zgp-dl.zgp-flash{background:rgba(88,166,255,.30) !important;}
 
   .zgp-cf-ov{position:absolute;inset:0;background:rgba(0,0,0,.38);display:flex;align-items:center;
     justify-content:center;z-index:20;padding:20px;}
@@ -458,6 +457,38 @@ module.exports = function installGitPanel(win, WS) {
     })
   }
 
+  /** 找到元素最近的可滚动祖先（弹窗是 vbody 自己滚，内嵌是面板 body 滚） */
+  function scrollHostOf (el) {
+    var n = el
+    while (n && n !== doc.body) {
+      var cs = win.getComputedStyle(n)
+      if (/(auto|scroll)/.test(cs.overflowY) && n.scrollHeight > n.clientHeight + 4) return n
+      n = n.parentElement
+    }
+    return el
+  }
+
+  /**
+   * diff 打开后默认落到第一处改动：把第一行 add/del 滚到视口约 1/3 高度并闪一下，
+   * 免得长文件每次都要自己往下翻。
+   */
+  function focusFirstChange (body) {
+    if (!body) return
+    var first = body.querySelector('.zgp-dl.add, .zgp-dl.del')
+    if (!first) return
+    var host = scrollHostOf(body)
+    try {
+      var hr = host.getBoundingClientRect()
+      var er = first.getBoundingClientRect()
+      var delta = er.top - hr.top
+      host.scrollTop = Math.max(0, host.scrollTop + delta - Math.round(host.clientHeight / 3))
+    } catch (e) {
+      try { first.scrollIntoView({ block: 'center' }) } catch (e2) {}
+    }
+    first.classList.add('zgp-flash')
+    win.setTimeout(function () { first.classList.remove('zgp-flash') }, 1200)
+  }
+
   // diff 渲染：带行号
   function renderDiffLines (lines) {
     let oldNo = 0, newNo = 0
@@ -512,7 +543,12 @@ module.exports = function installGitPanel(win, WS) {
       body.innerHTML = '<span class="zgp-dl">' + esc(content || '(空)') + '</span>'
     }
     view.classList.add('on')
-    body.scrollTop = 0
+    if (isDiff) {
+      // 必须先让弹窗可见再算位置，隐藏时 rect 全是 0
+      focusFirstChange(body)
+    } else {
+      body.scrollTop = 0
+    }
   }
 
   // ============ 当前笔记 ============
@@ -574,7 +610,7 @@ module.exports = function installGitPanel(win, WS) {
           if (!ok) return
           const r = await G.abortInProgress()
           toast(r.ok ? ('已中止 ' + st.inProgress) : ('中止失败：' + r.message), r.ok ? 'ok' : 'err')
-          refresh()
+          refreshAfterAction()
         }
         wrap.appendChild(b)
       }
@@ -585,7 +621,7 @@ module.exports = function installGitPanel(win, WS) {
         b2.onclick = async () => {
           const r = await G.clearStaleLock()
           toast(r.ok ? '已清理陈旧 index.lock' : ('清理失败：' + r.message), r.ok ? 'ok' : 'err')
-          refresh()
+          refreshAfterAction()
         }
         wrap.appendChild(b2)
       }
@@ -720,7 +756,7 @@ module.exports = function installGitPanel(win, WS) {
         if (r.ok) {
           toast('已推送：' + (r.data.steps.join(' · ') || '无改动'), 'ok')
           logCache = null
-          refresh()
+          refreshAfterAction()
         } else toast('推送失败：' + hintOf(r), 'err')
       }
     }
@@ -732,7 +768,7 @@ module.exports = function installGitPanel(win, WS) {
           toast('已还原到最近一次提交', 'ok')
           logCache = null
           try { if (win.__znotesReloadNote) win.__znotesReloadNote(rel) } catch (e) {}
-          refresh()
+          refreshAfterAction()
         } else if (rr.kind !== 'cancelled') {
           toast('还原失败：' + hintOf(rr), 'err')
         }
@@ -758,6 +794,8 @@ module.exports = function installGitPanel(win, WS) {
     const lines = stripDiffHeader(diff)
     body.innerHTML = renderDiffLines(lines)
     mountJumpBar(body)
+    // 首次渲染才跳；后续轮询刷新（内容没变）不打断用户当前阅读位置
+    if (!existedBody) focusFirstChange(body)
   }
 
   function renderChanges(st) {
@@ -806,7 +844,7 @@ module.exports = function installGitPanel(win, WS) {
             // 编辑器内部可能残留旧内容并触发自动保存，把还原结果又写回磁盘；
             // 整页刷新是唯一可靠的做法（还原属低频操作）
             try { if (win.__znotesReloadNote) win.__znotesReloadNote(f.path) } catch (err) {}
-            refresh()
+            refreshAfterAction()
           } else if (r.kind !== 'cancelled') {
             toast('还原失败：' + hintOf(r), 'err')
           }
@@ -938,7 +976,7 @@ module.exports = function installGitPanel(win, WS) {
           + '<button class="zgp-ic" data-cmpprev="' + i + '" title="与提交前比对：这一次提交本身对这篇笔记做了什么改动">' + ICON.cmpPrev + '</button>'
           + '<button class="zgp-ic" data-view="' + i + '" title="查看该版本：显示这次提交时这篇笔记的完整内容">' + ICON.eye + '</button>'
           + '<span style="flex:1"></span>'
-          + '<button class="zgp-ic danger" data-back="' + i + '" title="回溯到此版本：把这篇笔记恢复成这个版本的内容（改动前自动备份）">' + ICON.undo + '</button>'
+          + '<button class="zgp-ic danger" data-back="' + i + '" title="回溯到此版本：把这篇笔记恢复成这个版本的内容">' + ICON.undo + '</button>'
           + '</div>'
         : ''
       return '<div class="zgp-cm" data-c="' + i + '">'
@@ -987,7 +1025,7 @@ module.exports = function installGitPanel(win, WS) {
             toast('已回溯到 ' + c.short, 'ok')
             logCache = null
             try { if (win.__znotesReloadNote) win.__znotesReloadNote(onlyFile) } catch (e) {}
-            refresh()
+            refreshAfterAction()
           } else if (r.kind !== 'cancelled') {
             toast('回溯失败：' + hintOf(r), 'err')
           }
@@ -1019,7 +1057,7 @@ module.exports = function installGitPanel(win, WS) {
               + '<span class="zgp-fs ' + (f.status || '').charAt(0) + '">' + (f.status || '').charAt(0) + '</span>'
               + '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(f.path) + '">' + esc(f.path) + '</span>'
               + '<button class="zgp-ic" title="查看该次改动">' + ICON.diff + '</button>'
-              + '<button class="zgp-ic danger" data-restore="1" title="回溯到该版本（先备份）">' + ICON.undo + '</button>'
+              + '<button class="zgp-ic danger" data-restore="1" title="回溯到该版本">' + ICON.undo + '</button>'
               + '</div>'
           }).join('')
         }
@@ -1042,7 +1080,7 @@ module.exports = function installGitPanel(win, WS) {
               toast('已回溯到 ' + hash.slice(0, 7), 'ok')
               logCache = null
               try { if (win.__znotesReloadNote) win.__znotesReloadNote(p) } catch (err) {}
-              refresh()
+              refreshAfterAction()
             } else if (r3.kind !== 'cancelled') {
               toast('回溯失败：' + hintOf(r3), 'err')
             }
@@ -1099,6 +1137,23 @@ module.exports = function installGitPanel(win, WS) {
       refreshing = false
       if (pendingForce) { pendingForce = false; setTimeout(() => { try { refresh(true) } catch (e) {} }, 20) }
     }
+  }
+
+  /**
+   * 操作（提交/推送/拉取/还原/中止）完成后的刷新。
+   *
+   * 不能只调 refresh()：① 它带签名去重，读到和上次一样的中间状态会直接返回；
+   * ② git 命令返回时工作区/索引可能还没完全落稳，第一次读到的往往还是旧状态。
+   * 所以先强制刷一次，再补几次重试，同时把历史页和顶部分支条一起拉新。
+   */
+  function refreshAfterAction() {
+    try { refresh(true) } catch (e) {}
+    ;[120, 400, 1000, 2200].forEach(function (ms) {
+      setTimeout(function () { try { refresh(true) } catch (e) {} }, ms)
+    })
+    try { logCache = null } catch (e) {}
+    try { if (activeTab === 'history') renderHistory(true) } catch (e) {}
+    try { if (win.__zbbRefresh) win.__zbbRefresh() } catch (e) {}
   }
 
   // ============ 事件 ============
@@ -1212,7 +1267,7 @@ module.exports = function installGitPanel(win, WS) {
       } else {
         toast('同步失败：' + hintOf(r), 'err')
       }
-      refresh()
+      refreshAfterAction()
     }
 
     const pushBtn = $('zgp-push')
@@ -1221,7 +1276,7 @@ module.exports = function installGitPanel(win, WS) {
       const r = await G.push()
       busyUI(false)
       toast(r.ok ? '已推送' : ('推送失败：' + hintOf(r)), r.ok ? 'ok' : 'err')
-      refresh()
+      refreshAfterAction()
     }
 
     const pullBtn = $('zgp-pull')
@@ -1231,7 +1286,7 @@ module.exports = function installGitPanel(win, WS) {
       busyUI(false)
       toast(r.ok ? '已拉取' : ('拉取失败：' + hintOf(r)), r.ok ? 'ok' : 'err')
       logCache = null
-      refresh()
+      refreshAfterAction()
     }
   }
   bindStatusButtons()

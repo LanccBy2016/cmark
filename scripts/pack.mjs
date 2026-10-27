@@ -35,6 +35,15 @@ for (const f of fs.readdirSync(preloadDir)) {
   }
 }
 
+// 关键：uTools 导入源码工程时，工程目录就是 app/，Electron 加载 preload.js 会向上找
+// 最近的 package.json。仓库根那份是 "type": "module"（vite 需要），会把 app/preload.js
+// 误判成 ES Module 而直接拒绝加载 —— 表现是 preload 整体不执行、设置与 Git 面板全打不开。
+// 所以在 app/ 里放一份只说 commonjs 的 package.json，就近覆盖。
+fs.writeFileSync(
+  path.join(dist, 'package.json'),
+  JSON.stringify({ type: 'commonjs' }, null, 2) + '\n'
+)
+
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
 console.log('app 就绪，版本 ' + pkg.version)
 console.log('下一步：npx @electron/asar pack app cmark-' + pkg.version + '.asar')

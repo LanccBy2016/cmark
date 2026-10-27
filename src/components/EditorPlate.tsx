@@ -40,6 +40,9 @@ import { EquationPlugin, InlineEquationPlugin } from '@platejs/math/react'
 import { LinkPlugin } from '@platejs/link/react'
 import { ImagePlugin } from '@platejs/media/react'
 import { MarkdownPlugin } from '@platejs/markdown'
+import { applyTableAligns, extractTableAligns, fillTableAligns, collectTableAligns } from '../core/table-align'
+import { flattenAutolinks } from '../core/autolink'
+import { tidyMarkdown } from '../core/md-tidy'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import { KEYS } from 'platejs'
@@ -77,6 +80,7 @@ import {
   TableElement,
   TableRowElement,
 } from './plate-elements'
+import { EquationDialogHost, openEquationDialog } from './EquationDialog'
 
 /**
  * remark-stringify 默认会往行末塞反斜杠（hard break），
@@ -415,9 +419,21 @@ export function Editor() {
   useEffect(() => {
     if (!currentRel) return
     try {
-      const parsed = postDeserialize(
-        editor.getApi(MarkdownPlugin).markdown.deserialize(preDeserialize(content || '')) as never,
+      const srcMd = content || ''
+      const parsedRaw = postDeserialize(
+        editor.getApi(MarkdownPlugin).markdown.deserialize(preDeserialize(srcMd)) as never,
       ) as unknown as unknown[]
+      // 裸 URL / 裸邮箱会被 GFM autolink 变成链接，序列化又写成 <mailto:...> / [x](x)，
+      // 等于擅自改写用户原文。这里把"文字就是地址"的链接拆回纯文本。
+      let parsed = parsedRaw
+      try {
+        parsed = flattenAutolinks(parsedRaw as unknown[]) as unknown as typeof parsedRaw
+      } catch (e) {}
+      // 表格列对齐只存在于 markdown 的分隔行里，Plate 的表格规则不读它 ——
+      // 不在这里回填，用户改完对齐切个文件就还原
+      try {
+        fillTableAligns(parsed as unknown[], extractTableAligns(srcMd))
+      } catch (e) {}
       // 不再往树里补空段落：那会改变源码的渲染结果（块上下凭空多出空行）。
       // 插入位置改由块元素自己的上下判定带负责（点一下就在块前/块后落光标，
       // 只在该处确实没有段落时才新建），见 plate-elements.tsx 的 placeBesideVoid。
@@ -568,11 +584,23 @@ export function Editor() {
           } else if (kind === 'hr') {
             editor.tf.insertNodes({ type: KEYS.hr, children: [{ text: '' }] } as never)
           } else if (kind === 'math') {
-            editor.tf.insertNodes({
-              type: KEYS.equation,
-              texExpression: 'E = mc^2',
-              children: [{ text: '' }],
-            } as never)
+            // 先弹窗写 LaTeX，确定后再插入节点 —— 插入和编辑共用同一个弹窗，
+            // 也不用去猜刚插入节点的路径
+            openEquationDialog({
+              tex: '',
+              title: '插入公式',
+              onApply: (next) => {
+                try {
+                  editor.tf.insertNodes({
+                    type: KEYS.equation,
+                    texExpression: next,
+                    children: [{ text: '' }],
+                  } as never)
+                } catch (err) {
+                  console.error('[insert-equation]', err)
+                }
+              },
+            })
           }
         } catch (e) {}
       },
@@ -643,6 +671,8 @@ export function Editor() {
 
   return (
     <div className={'plate-host' + (locked ? ' is-locked' : '')} style={wrapStyle}>
+      {/* 公式弹窗宿主：块级/行内公式的编辑按钮和「插入公式」都触发它 */}
+      <EquationDialogHost />
       <Plate
         editor={editor}
         onValueChange={({ value }) => {
@@ -652,9 +682,25 @@ export function Editor() {
               // mark → 占位符 → 序列化 → 占位符 → 真实标记
               // 直接序列化会把 Plate 不认识的 mark（highlight/sub/sup）丢掉
               try {
-                const withPh = markToPlaceholder(protectSyntax(stripSynthetic(value as any[])) as never)
+                // 序列化前同样降级：用户在编辑器里敲出裸 URL / 邮箱时，link 插件可能已把它变成链接，
+                // 不在这里拦掉就会写回 [x](x) / <x@y.com>
+                let cleanValue: unknown[] = stripSynthetic(value as any[])
+                try {
+                  cleanValue = flattenAutolinks(cleanValue) as unknown[]
+                } catch (e) {}
+                const withPh = markToPlaceholder(protectSyntax(cleanValue as any) as never)
                 const raw = editor.getApi(MarkdownPlugin).markdown.serialize({ value: withPh as never })
-                setContent(placeholderToMd(raw))
+                // 序列化器统一写 `---`，这里按节点上的 align 还原成 `:---:` / `---:`
+                let outMd = placeholderToMd(raw)
+                try {
+                  outMd = applyTableAligns(outMd, collectTableAligns(value as unknown[]))
+                } catch (e) {}
+                // 收尾：remark 会把正文里的 @ . 转义成 \@ \.（怕被当成 autolink），
+                // 还会在末尾堆空行，这里统一还原/压缩
+                try {
+                  outMd = tidyMarkdown(outMd)
+                } catch (e) {}
+                setContent(outMd)
               } catch (err) {
                 // 序列化抛错时绝不能静默：一旦吞掉，setContent 不再被调用，
                 // 此后所有输入既不写回也不自动保存，用户完全无感知

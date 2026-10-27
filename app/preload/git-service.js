@@ -20,6 +20,7 @@ const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const crypto = require('crypto')
+const wsPrefs = require('./ws-prefs.js')
 
 const DEFAULTS = {
   autoSync: false,
@@ -30,7 +31,8 @@ const DEFAULTS = {
   pullBeforePush: true,
   pushEnabled: true,
   commitScope: 'notes',
-  commitMessage: 'notes: 同步 {{datetime}}',
+  // 提交信息固定，不开放给用户配置（少一个配置项，也避免有人把模板改坏导致历史不可读）
+  commitMessage: 'cmark sync:{{datetime}}',
   lastRunAt: 0,
   failCount: 0
 }
@@ -241,10 +243,42 @@ module.exports = function installGitService(win, argvPath) {
   // git 会弹出「选择凭据助手」的 GUI 窗口，在插件里就是卡死。
   const BASE_ARGS = ['-c', 'core.quotepath=false', '-c', 'credential.helper=', '-c', 'credential.helper=manager']
 
+  // ---- 远端凭据（一键建仓用）----
+  // token 存在 ~/.cmark-config.json 的 remoteToken 里，网络命令用内联 credential helper
+  // 从环境变量读取：不写进 .git/config，也不出现在 git 的命令行参数里。
+  const NET_CFG_FILE = path.join(os.homedir(), '.cmark-config.json')
+  let netCfgCache = { t: -1, data: null }
+  function readNetCfg () {
+    try {
+      const st = fs.statSync(NET_CFG_FILE)
+      if (netCfgCache.data && netCfgCache.t === st.mtimeMs) return netCfgCache.data
+      const d = JSON.parse(fs.readFileSync(NET_CFG_FILE, 'utf8'))
+      netCfgCache = { t: st.mtimeMs, data: d }
+      return d
+    } catch (e) { return null }
+  }
+  const NET_CMDS = { push: 1, pull: 1, fetch: 1, 'ls-remote': 1, clone: 1 }
+  function netToken (args) {
+    if (!args.some(function (a) { return NET_CMDS[a] })) return null
+    // 先取本工作区的凭据，再回退到旧版全局配置（迁移兼容）
+    try {
+      const p = wsPrefs.read(WS)
+      if (p.remoteToken && p.remoteToken.token) return p.remoteToken.token
+    } catch (e) {}
+    const c = readNetCfg()
+    const t = c && c.remoteToken
+    return t && t.token ? t.token : null
+  }
+  const TOKEN_HELPER = '!f() { echo username=x-access-token; echo password=$CMARK_GIT_TOKEN; }; f'
+
   function exec(args, opt) {
     const o = opt || {}
+    const token = o.token || netToken(args)
+    const pre = token
+      ? ['-c', 'core.quotepath=false', '-c', 'credential.helper=', '-c', 'credential.helper=' + TOKEN_HELPER]
+      : BASE_ARGS
     return new Promise((resolve) => {
-      execFile('git', BASE_ARGS.concat(args), {
+      execFile('git', pre.concat(args), {
         cwd: repoRoot || WS,
         encoding: o.buffer ? 'buffer' : 'utf8',
         maxBuffer: 32 * 1024 * 1024,
@@ -254,7 +288,8 @@ module.exports = function installGitService(win, argvPath) {
           GCM_INTERACTIVE: 'never',
           GIT_TERMINAL_PROMPT: '0',
           GIT_LITERAL_PATHSPECS: '1',
-          LC_ALL: 'C'
+          LC_ALL: 'C',
+          CMARK_GIT_TOKEN: token || ''
         })
       }, (err, stdout, stderr) => {
         if (err) {
@@ -688,7 +723,8 @@ module.exports = function installGitService(win, argvPath) {
     const names = staged.data.split('\0').filter(Boolean)
     if (!names.length) return { ok: false, kind: 'nothing', message: ERR_TEXT.nothing }
 
-    const msg = formatMessage(message || cfg.commitMessage, { count: names.length })
+    // 固定使用内置模板：cmark sync:YYYY-MM-DD HH:mm:ss
+    const msg = formatMessage(DEFAULTS.commitMessage, { count: names.length })
     const r = await runGit(['commit', '-m', msg], { label: 'commit', timeout: 90000 })
     if (!r.ok) return r
     return { ok: true, data: { message: msg, files: names.length } }
@@ -1280,6 +1316,29 @@ module.exports = function installGitService(win, argvPath) {
     }
   }
 
+  // ---- 手填远程地址的支持 ----
+  // 远程地址可能是需要授权的私有仓库（GitHub/Gitee/自建 GitLab 等）。
+  // 这里给两个能力：先探测（看能不能免授权访问），再用显式 token 探测/绑定。
+  async function probeRemote (url, token) {
+    const u = String(url || '').trim()
+    if (!u) return { ok: false, kind: 'badrev', message: '请填写远程仓库地址' }
+    if (!/^(https?:\/\/|git@|ssh:\/\/|file:\/\/|[A-Za-z]:[\\/]|\\\\|\/)/.test(u)) {
+      return { ok: false, kind: 'badrev', message: '远程地址格式不正确：' + u }
+    }
+    const r = await runGit(['ls-remote', '--heads', u], { label: 'probe', timeout: 60000, token: token || undefined })
+    if (r.ok) return { ok: true, data: { hasRefs: !!String(r.data || '').trim() } }
+    return { ok: false, kind: r.kind, message: r.message }
+  }
+
+  /** 保存手填地址用的访问令牌（按工作区存，记录地址用于展示） */
+  function setRemoteToken (token, url) {
+    const t = String(token || '').trim()
+    if (!t) return { ok: false, message: '令牌为空' }
+    const res = wsPrefs.patch(WS, { remoteToken: { provider: 'custom', token: t, url: String(url || '').trim() } })
+    if (res && res.ok === false) return res
+    return { ok: true }
+  }
+
   async function setRemote(url) {
     const pre = precheck()
     if (!pre.ok) return pre
@@ -1357,6 +1416,7 @@ module.exports = function installGitService(win, argvPath) {
     stage, unstage, discard, restoreTo,
     commitAll, push, pull, sync,
     remoteInfo: getRemoteInfo, setRemote,
+    probeRemote, setRemoteToken,
     identity: getIdentity, setIdentity,
     abortInProgress,
     clearStaleLock,

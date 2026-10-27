@@ -7,12 +7,42 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNotes } from '../store/notes'
 
-type AiModel = { id: string; value: string; label: string; providerLabel?: string; modelId?: string }
+/**
+ * 宿主模型字段不统一：
+ *   ZTools  { value, label, providerLabel, modelId }
+ *   uTools  { id, label, description, icon, cost }   ← 没有 value，之前直接读 m.value 会得到 undefined
+ */
+type AiModel = {
+  id?: string
+  value?: string
+  label?: string
+  name?: string
+  modelId?: string
+  providerLabel?: string
+}
+
+/** 归一化成 { value, label }，两个宿主都能用 */
+function normalizeModels(list: unknown): { value: string; label: string }[] {
+  const arr = Array.isArray(list) ? list : []
+  return arr
+    .map((m) => {
+      const o = m as AiModel
+      const value = String(o.value ?? o.id ?? o.modelId ?? '')
+      const label = String(o.label ?? o.name ?? value)
+      return { value, label }
+    })
+    .filter((m) => m.value !== '')
+}
 
 type Zt = {
   allAiModels?: () => Promise<AiModel[]>
+  /** uTools >= 7.0 与 ZTools 都有：非流式调用，model 可省略（uTools 默认 deepseek-v3） */
+  ai?: (
+    option: { model?: string; messages: { role: string; content: string }[] },
+    streamCallback?: (chunk: unknown) => void
+  ) => Promise<{ content?: string }>
   aiChat?: (
-    option: { model: string; messages: { role: string; content: string }[]; temperature?: number },
+    option: { model?: string; messages: { role: string; content: string }[]; temperature?: number },
     cb?: (payload: unknown) => void
   ) => Promise<unknown>
   redirectAiModelsSetting?: () => void
@@ -104,8 +134,10 @@ function toNodesSafe(md: string): unknown[] {
 }
 
 export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [models, setModels] = useState<AiModel[]>([])
+  const [models, setModels] = useState<{ value: string; label: string }[]>([])
   const [model, setModel] = useState('')
+  /** 宿主是否具备 AI 能力（两个宿主都有 ai，ZTools 另有流式 aiChat） */
+  const [hostAi, setHostAi] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
   const [presetBusy, setPresetBusy] = useState<'mermaid' | 'echarts' | 'table' | null>(null)
@@ -117,16 +149,29 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
     if (!open) return
     setErr('')
     void (async () => {
+      const z = zt()
+      const canAi = typeof z?.ai === 'function' || typeof z?.aiChat === 'function'
+      setHostAi(canAi)
+      let arr: { value: string; label: string }[] = []
       try {
-        const list = await zt()?.allAiModels?.()
-        const arr = Array.isArray(list) ? list : []
-        setModels(arr)
-        const saved = window.localStorage.getItem('cmark-ai-model')
-        const pick = arr.find((m) => m.value === saved) || arr[0]
-        setModel(pick ? pick.value : '')
+        arr = normalizeModels(await Promise.resolve(z?.allAiModels?.()).catch(() => []))
       } catch (e) {
-        setErr('读取模型列表失败：' + ((e as Error)?.message || ''))
+        arr = []
       }
+      if (!arr.length && canAi) {
+        // uTools / ZTools 的 ai 都允许不传 model（uTools 默认 deepseek-v3），
+        // 列出空的时候给一个默认项，别让三个按钮全灰掉。
+        arr = [{ value: '', label: '默认模型' }]
+      }
+      setModels(arr)
+      if (!canAi) {
+        setErr('当前宿主没有可用的 AI 能力。uTools 需要先在开发者中心为插件开通 AI，ZTools 需要在设置里配置模型。')
+        return
+      }
+      let saved = ''
+      try { saved = window.localStorage.getItem('cmark-ai-model') || '' } catch (e) { saved = '' }
+      const pick = arr.find((m) => m.value === saved) || arr[0]
+      setModel(pick ? pick.value : '')
     })()
   }, [open])
 
@@ -139,17 +184,17 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
         return
       }
       const api = zt() as unknown as {
-        ai?: (o: { model: string; messages: { role: string; content: string }[] }) => Promise<{ content?: string }>
+        ai?: (o: { model?: string; messages: { role: string; content: string }[] }) => Promise<{ content?: string }>
         aiChat?: (
-          o: { model: string; messages: { role: string; content: string }[]; temperature?: number },
+          o: { model?: string; messages: { role: string; content: string }[]; temperature?: number },
           cb?: (p: unknown) => void
         ) => Promise<unknown>
       }
-      if (!api?.ai && !api?.aiChat) {
-        setErr('当前 ZTools 版本没有提供 AI 接口')
+      if (typeof api?.ai !== 'function' && typeof api?.aiChat !== 'function') {
+        setErr('当前宿主没有提供 AI 接口。uTools 需要在开发者中心为插件开通 AI 能力，ZTools 需要在设置里配置模型。')
         return
       }
-      window.localStorage.setItem('cmark-ai-model', model)
+      try { window.localStorage.setItem('cmark-ai-model', model) } catch (e) {}
       setBusy(true)
       setErr('')
       setPresetBusy(kind)
@@ -157,7 +202,8 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
         let text = ''
         if (api.ai) {
           const r = await api.ai({
-            model,
+            // model 为空时不传：uTools 会走默认模型（deepseek-v3）
+            ...(model ? { model } : {}),
             messages: [
               { role: 'system', content: PRESETS[kind] },
               { role: 'user', content: prompt },
@@ -166,7 +212,7 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
           text = String(r?.content || '')
         } else {
           const r = (await api.aiChat!({
-            model,
+            ...(model ? { model } : {}),
             messages: [
               { role: 'system', content: PRESETS[kind] },
               { role: 'user', content: prompt },
@@ -242,14 +288,16 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
               </option>
             ))}
           </select>
-          <button
-            type="button"
-            className="ai-link"
-            onClick={() => zt()?.redirectAiModelsSetting?.()}
-            title="在 ZTools 设置里管理模型"
-          >
-            模型设置
-          </button>
+          {typeof zt()?.redirectAiModelsSetting === 'function' ? (
+            <button
+              type="button"
+              className="ai-link"
+              onClick={() => zt()?.redirectAiModelsSetting?.()}
+              title="在 ZTools 设置里管理模型"
+            >
+              模型设置
+            </button>
+          ) : null}
         </div>
 
         <div className="ai-body">
@@ -271,7 +319,7 @@ export function AiPanel({ open, onClose }: { open: boolean; onClose: () => void 
               key={m.key}
               type="button"
               className="ai-preset-btn"
-              disabled={busy || !model}
+              disabled={busy || (!model && !hostAi)}
               title={m.label}
               onClick={() => void runPreset(m.key)}
             >

@@ -117,6 +117,14 @@ module.exports = function attachSettingsPanel (win) {
   /* 状态卡里的远端地址可能很长，允许在任意位置折行 */
   .zgs-kv-url{word-break:break-all;}
   /* 只读地址框：看起来是"展示"，不是"待填" */
+  #zgs-body .zgs-auth-err{margin:10px 0 0;padding:10px 12px;border-radius:8px;font-size:12px;line-height:1.7;
+    color:#cf222e;background:rgba(207,34,46,.10);border:1px solid rgba(207,34,46,.35);word-break:break-word;}
+  :root[data-theme='dark'] #zgs-body .zgs-auth-err{color:#ff8f85;background:rgba(255,120,110,.12);border-color:rgba(255,120,110,.4);}
+  /* 抽屉内的小节（提交 / 自动同步）：用细分隔线与上方仓库状态隔开 */
+  #zgs-body .zgs-sub{margin-top:16px;padding-top:14px;border-top:1px solid rgba(128,128,128,.22);}
+  #zgs-body .zgs-sub h5{font-size:12px;font-weight:600;margin:0 0 8px;letter-spacing:.02em;}
+  /* Git 未启用时，提交/自动同步整体置灰且不可交互 */
+  #zgs-body .zgp-sec.is-disabled{opacity:.45;pointer-events:none;filter:grayscale(.4);}
   #zgs-body .zgp-in[readonly]{opacity:.8;cursor:default;background:rgba(127,127,127,.08);}
   #zgs-body .zgp-in{padding-left:12px;padding-right:12px;height:34px;box-sizing:border-box;}
   #zgs-body .zgp-in:focus{outline:none;border-color:rgba(120,160,255,.55);
@@ -251,6 +259,8 @@ module.exports = function attachSettingsPanel (win) {
 
   // ---------- 渲染 ----------
   async function render () {
+    // 页面重载后 <html> 上的 data-theme 有可能还没写上，这里兜一次
+    try { if (win.__CMARK_THEME && win.__CMARK_THEME.apply) win.__CMARK_THEME.apply() } catch (e) {}
     if (!G) {
       $('zgs-body').innerHTML = '<div class="zgp-sec"><h5>不可用</h5><div class="zgp-desc">Git 服务未加载</div></div>'
       return
@@ -268,109 +278,68 @@ module.exports = function attachSettingsPanel (win) {
 
     $('zgs-body').innerHTML = `
       <div class="zgp-sec">
-        <h5>笔记目录</h5>
-        <dl class="zgs-kv"><dt>当前目录</dt><dd class="mono" id="s-ws">${esc(win.__ZNOTES_WS || '-')}</dd></dl>
-        <div class="zgp-row" style="margin-top:8px">
-          <button class="zgp-b" id="s-ws-pick">更换目录</button>
-          <button class="zgp-b" id="s-ws-open">在资源管理器打开</button>
+        <h5>外观</h5>
+        <div class="zgp-row" id="s-theme-row">
+          <button class="zgp-b" id="s-theme-light">浅色</button>
+          <button class="zgp-b" id="s-theme-dark">深色</button>
+          <button class="zgp-b" id="s-theme-system">跟随系统</button>
         </div>
-        <div class="zgp-desc">更换后重新扫描该目录下的 Markdown 文件；文件本身不会被移动或修改。</div>
+        <div class="zgp-desc">主题对所有界面生效，选择后立即应用并记住。</div>
       </div>
       <div class="zgp-sec">
-        <h5>版本控制</h5>
-        <dl class="zgs-kv" id="s-vc-kv">
-          <dt>状态</dt><dd><span class="zgs-dot off"></span>读取中…</dd>
+        <h5>工作区信息</h5>
+        <dl class="zgs-kv">
+          <dt>工作区目录</dt><dd class="mono" id="s-repo-dir">—</dd>
+          <dt>笔记目录</dt><dd class="mono" id="s-ws">—</dd>
+          <dt>附件目录</dt><dd class="mono" id="s-attach-dir">—</dd>
+          <dt>附件</dt><dd id="s-attach">统计中…</dd>
         </dl>
-
-        <div id="s-vc-init" style="display:none">
-          <div class="zgp-row" style="margin-top:14px">
-            <button class="zgp-b primary" id="s-vc-init-btn">初始化本地仓库</button>
-            <button class="zgp-b" id="s-vc-adopt-btn">从远程仓库加载</button>
-          </div>
-          <div class="zgp-desc">
-            初始化：在本地建立版本历史，之后可再关联远端。<br>
-            从远程加载：把远端已有的笔记拉到本地，要求工作区为空。
-          </div>
+        <div class="zgp-row" style="margin-top:8px">
+          <button class="zgp-b" id="s-repo-pick">修改工作区</button>
+          <button class="zgp-b" id="s-notes-pick">选择笔记目录</button>
+          <button class="zgp-b" id="s-attach-clean" title="直接删除没有任何笔记引用的附件（不做回收站，误删可从 git 历史取回）">清理未引用附件</button>
         </div>
-
-        <div id="s-vc-ready" style="display:none">
-          <!-- 只有本机仓库、还没绑定远端时，只露一个入口，不先摆一个空地址框 -->
-          <div id="s-vc-link-row" style="display:none">
-            <div class="zgp-row" style="margin-top:14px">
-              <button class="zgp-b primary" id="s-vc-link-btn">将本地仓库关联到远程</button>
-            </div>
-          </div>
-          <!-- 已关联远端（或点了上面的按钮）才展开地址框 -->
-          <div id="s-vc-remote-box" style="display:none">
-            <div class="zgp-row" style="margin-top:12px">
-              <button class="zgp-b danger" id="s-vc-remote-clear">移除远端</button>
-            </div>
-          </div>
-        </div>
+        <div class="zgp-desc">默认在 <span class="mono">文档\CMark</span>；修改后重新扫描该目录下的 Markdown 文件，文件本身不会被移动或修改。</div>
       </div>
       <div class="zgp-sec">
-        <h5>提交</h5>
-        <div class="zgp-field">
-          <div class="zgp-lab"><span>自定义模板</span>
-            <label class="zgp-sw"><input type="checkbox" id="s-msg-custom"><i></i></label>
-          </div>
-          <div class="zgp-desc">关闭时使用默认模板与全局 git 身份；打开后可以分别自定义。</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <h5 style="margin:0">Git 集成</h5>
+          <label class="zgp-sw"><input type="checkbox" id="s-git-enabled"><i></i></label>
         </div>
-        <div class="zgp-drawer" id="s-msg-drawer">
-          <div class="zgp-field">
-            <label class="zgs-lab" for="s-msg">提交信息模板</label>
-            <input class="zgp-in" id="s-msg" value="${esc(cfg.commitMessage)}">
-            <div class="zgp-desc">可用变量：{{date}} {{time}} {{datetime}} {{count}}</div>
-          </div>
-          <div class="zgp-field">
-            <label class="zgs-lab" for="s-vc-name2">提交者姓名</label>
-            <input class="zgp-in" id="s-vc-name2" placeholder="留空则使用全局 git 配置">
-            <label class="zgs-lab" for="s-vc-email2" style="margin-top:10px">提交者邮箱</label>
-            <input class="zgp-in" id="s-vc-email2" placeholder="留空则使用全局 git 配置">
-            <div class="zgp-row" style="margin-top:10px">
-              <button class="zgp-b" id="s-vc-id-save">保存提交者身份</button>
-            </div>
-            <div class="zgp-desc" id="s-vc-id-hint2"></div>
-          </div>
-        </div>
-      </div>
-      <div class="zgp-sec">
-        <h5>自动同步</h5>
-        <div class="zgp-field">
-          <div class="zgp-lab"><span>定时提交并推送</span>
+        <div class="zgp-desc" style="margin-top:6px">打开后可以提交历史、回溯版本，并同步到你自己的远程仓库。</div>
+        <div class="zgp-drawer" id="s-git-drawer">
+          <div id="s-git-body"></div>
+            <div class="zgs-sub" id="s-sec-auto">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+            <h5 style="margin:0">自动同步</h5>
             <label class="zgp-sw"><input type="checkbox" id="s-auto" ${cfg.autoSync ? 'checked' : ''}><i></i></label>
           </div>
-          <div class="zgp-desc">按下方策略执行；只在有改动时才产生提交。</div>
+          <div class="zgp-desc" style="margin:6px 0 10px">按下方策略执行；只在有改动时才产生提交。</div>
+          <div class="zgp-drawer${cfg.autoSync ? ' open' : ''}" id="s-auto-drawer">
+            <div class="zgp-field">
+              <div class="zgp-lab"><span>触发方式</span></div>
+              <select class="zgp-sel" id="s-mode">
+                <option value="interval"${mode === 'interval' ? ' selected' : ''}>固定间隔</option>
+                <option value="stop-edit"${mode === 'stop-edit' ? ' selected' : ''}>停止编辑后</option>
+              </select>
+            </div>
+            <div class="zgp-field" id="s-interval-row"${mode === 'interval' ? '' : ' style="display:none"'}>
+              <div class="zgp-lab"><span>间隔时长</span></div>
+              <select class="zgp-sel" id="s-interval">${ivHtml}</select>
+              <div class="zgp-desc">跨会话生效：即使插件没开够一个间隔，下次启动会补一次。</div>
+            </div>
+            <div class="zgp-field" id="s-stop-row"${mode === 'stop-edit' ? '' : ' style="display:none"'}>
+              <div class="zgp-lab"><span>静默时长</span></div>
+              <select class="zgp-sel" id="s-stop">${stopHtml}</select>
+              <div class="zgp-desc">停止输入 N 分钟后触发一次，适合边写边自动保存。</div>
+            </div>
+          </div>
         </div>
-        <div class="zgp-drawer${cfg.autoSync ? ' open' : ''}" id="s-auto-drawer">
-          <div class="zgp-field">
-            <div class="zgp-lab"><span>触发方式</span></div>
-            <select class="zgp-sel" id="s-mode">
-              <option value="interval"${mode === 'interval' ? ' selected' : ''}>固定间隔</option>
-              <option value="stop-edit"${mode === 'stop-edit' ? ' selected' : ''}>停止编辑后</option>
-            </select>
-            <div class="zgp-desc">两种方式互斥，只能选一种。</div>
-          </div>
-          <div class="zgp-field" id="s-interval-row"${mode === 'interval' ? '' : ' style="display:none"'}>
-            <div class="zgp-lab"><span>间隔时长</span></div>
-            <select class="zgp-sel" id="s-interval">${ivHtml}</select>
-            <div class="zgp-desc">跨会话生效：即使插件没开够一个间隔，下次启动会补一次。</div>
-          </div>
-          <div class="zgp-field" id="s-stop-row"${mode === 'stop-edit' ? '' : ' style="display:none"'}>
-            <div class="zgp-lab"><span>静默时长</span></div>
-            <select class="zgp-sel" id="s-stop">${stopHtml}</select>
-            <div class="zgp-desc">停止输入 N 分钟后触发一次，适合边写边自动保存。</div>
-          </div>
         </div>
       </div>
       <div class="zgp-sec">
         <h5>运行状态</h5>
         <div class="zgp-desc" id="s-repo">读取中…</div>
-        <div class="zgp-desc" id="s-info"></div>
-        <div class="zgp-desc" id="s-attach" style="margin-top:8px">附件：统计中…</div>
-        <div style="margin-top:8px">
-          <button class="zgp-b" id="s-attach-clean" title="直接删除没有任何笔记引用的附件（不做回收站，误删可从 git 历史取回）">清理未引用附件</button>
-        </div>
       </div>
     `
 
@@ -384,19 +353,23 @@ module.exports = function attachSettingsPanel (win) {
       if (v >= 1024) return (v / 1024).toFixed(0) + ' KB'
       return v + ' B'
     }
+    const attachDirEl = $('s-attach-dir')
     const refreshAttachStat = function () {
+      if (attachDirEl) {
+        const ws = win.__ZNOTES_WS || ''
+        attachDirEl.textContent = ws ? (ws.replace(/[\\/]+$/, '') + '\\.attachments') : '未设置笔记目录'
+      }
       if (!attachBox) return
       try {
         const api = win.__CMARK
         const s = api && api.scanAttachments ? api.scanAttachments() : null
         if (!s || !s.ok) {
-          attachBox.textContent = '附件：读取失败' + (s && s.message ? '（' + s.message + '）' : '')
+          attachBox.textContent = '读取失败' + (s && s.message ? '（' + s.message + '）' : '')
           return
         }
         const total = Number(s.total) || 0
         const unused = (s.unused || []).length
-        attachBox.textContent =
-          '附件：' + total + ' 个，共 ' + fmtSize(s.allBytes) +
+        attachBox.textContent = total + ' 个，共 ' + fmtSize(s.allBytes) +
           '；未引用 ' + unused + ' 个（' + fmtSize(s.unusedBytes) + '）'
       } catch (e) {}
     }
@@ -425,267 +398,374 @@ module.exports = function attachSettingsPanel (win) {
       }
     }
 
-    const pickBtn = $('s-ws-pick')
-    if (pickBtn) {
-      pickBtn.onclick = function () {
+    // ---------- 外观：主题三态 ----------
+    const themeSvc = win.__CMARK_THEME
+    const curMode = (themeSvc && themeSvc.get && themeSvc.get().mode) || 'system'
+    const modeLabel = { light: '浅色', dark: '深色', system: '跟随系统' }
+    ;['light', 'dark', 'system'].forEach(function (m) {
+      const btn = $('s-theme-' + m)
+      if (!btn) return
+      if (m === curMode) btn.classList.add('primary')
+      btn.onclick = function () {
+        if (!themeSvc || !themeSvc.set) return toast('主题服务未就绪', 'err')
+        themeSvc.set(m)
+        ;['light', 'dark', 'system'].forEach(function (mm) {
+          const bb = $('s-theme-' + mm)
+          if (bb) bb.classList.toggle('primary', mm === m)
+        })
+        toast('已切换为' + modeLabel[m])
+      }
+    })
+
+    // ---------- Git 集成：开关 + 按目录状态渲染 ----------
+    const fs = require('fs')
+    const GIT_KEY = 'cmark-git-enabled'
+    const gitSwitch = $('s-git-enabled')
+    const gitDrawer = $('s-git-drawer')
+    const gitBody = $('s-git-body')
+    const secAuto = $('s-sec-auto')
+
+    // 状态源：优先 preload 暴露的配置文件接口（file:// 下 localStorage 可能不可用）
+    const readGitFlag = function (fallback) {
+      try {
+        const v = win.__CMARK_GIT && win.__CMARK_GIT.get ? win.__CMARK_GIT.get() : undefined
+        if (v === true || v === false) return v
+      } catch (e) {}
+      try {
+        const v = win.localStorage.getItem(GIT_KEY)
+        if (v === '1') return true
+        if (v === '0') return false
+      } catch (e) {}
+      return fallback
+    }
+    const writeGitFlag = function (on) {
+      try {
+        if (win.__CMARK_GIT && win.__CMARK_GIT.set) { win.__CMARK_GIT.set(on); return } } catch (e) {}
+      try { win.localStorage.setItem(GIT_KEY, on ? '1' : '0') } catch (e) {}
+      try { win.dispatchEvent(new CustomEvent('cmark-git-changed', { detail: { enabled: !!on } })) } catch (e) {}
+    }
+    const setSectionsDisabled = function (disabled, reason) {
+      const secs = [secAuto]
+      for (let i = 0; i < secs.length; i++) {
+        const sec = secs[i]
+        if (!sec) continue
+        sec.classList.toggle('is-disabled', !!disabled)
+        // 置灰时把原因挂在容器上：disabled 的控件本身不弹 title，但祖先的 title 会生效
+        if (disabled) sec.setAttribute('title', reason || '请先配置 Git 仓库')
+        else sec.removeAttribute('title')
+        const nodes = sec.querySelectorAll('input,select,button')
+        for (let j = 0; j < nodes.length; j++) nodes[j].disabled = !!disabled
+      }
+    }
+    const openWizard = function (p) {
+      if (win.__CMARK_OPEN_WIZARD) win.__CMARK_OPEN_WIZARD(p)
+      else toast('建仓向导未加载', 'err')
+    }
+    const afterGitChange = function () {
+      try { win.dispatchEvent(new CustomEvent('cmark-git-changed')) } catch (e) {}
+      refreshGitSection().catch(function () {})
+    }
+
+    // 认证失败时在抽屉顶部插入提示条，并给一个直接重新授权的入口
+    const showAuthError = function (msg) {
+      if (!gitBody) return
+      const old = gitBody.querySelector('.zgs-auth-err')
+      if (old) old.remove()
+      let prov = 'github'
+      try {
+        const cur = (win.__CMARK_REMOTE && win.__CMARK_REMOTE.current) ? win.__CMARK_REMOTE.current() : null
+        if (cur && cur.provider) prov = cur.provider
+      } catch (e) {}
+      const box = doc.createElement('div')
+      box.className = 'zgs-auth-err'
+      box.innerHTML = '授权可能已失效，推送/拉取被拒绝：' + esc(String(msg || '').slice(0, 180)) +
+        '<div class="zgp-row" style="margin-top:8px"><button class="zgp-b primary" id="s-git-reauth">重新授权</button></div>'
+      gitBody.insertBefore(box, gitBody.firstChild)
+      const rb = box.querySelector('#s-git-reauth')
+      if (rb) rb.onclick = function () { openWizard(prov) }
+      toast('授权可能已失效，可点「重新授权」', 'err')
+    }
+
+    // 本机 git 可用性：首次检测后缓存，装完 git 可点「重新检测」刷新
+    let gitProbe = null
+    // 每次打开面板只做一次「未初始化则关开关」的校正；否则用户点开关会被立刻打回
+    let gitGateDone = false
+    const AUTH_RE = /Authentication failed|could not read Username|could not read Password|Permission denied|Authentication required|Invalid username or password|returned error: 403|403 Forbidden|support for password authentication/i
+    const isAuthError = function (msg) { return AUTH_RE.test(String(msg || '')) }
+
+    async function refreshGitSection () {
+      if (!gitBody) return
+
+      if (gitProbe === null) {
         try {
-          if (win.__znotesPickDir) win.__znotesPickDir()
-          else toast('更换目录功能不可用', 'err')
-        } catch (e) {
-          toast('打开目录选择失败：' + (e && e.message), 'err')
+          const cp = require('child_process')
+          const out = cp.execFileSync('git', ['--version'], { encoding: 'utf8', timeout: 6000, windowsHide: true })
+          gitProbe = { ok: true, ver: String(out || '').trim() }
+        } catch (e) { gitProbe = { ok: false, ver: '' } }
+      }
+      if (!gitProbe.ok) {
+        if (gitSwitch) { gitSwitch.checked = false; gitSwitch.disabled = true }
+        if (gitDrawer) gitDrawer.classList.add('open')
+        setSectionsDisabled(true, '请先安装 Git')
+        gitBody.innerHTML =
+          '<div class="zgs-auth-err">没检测到本机安装 Git，无法使用 Git 集成。</div>' +
+          '<div class="zgp-desc">装好 Git for Windows 后点「重新检测」；如果装完仍提示未安装，重启一次 ZTools 让 PATH 生效。</div>' +
+          '<div class="zgp-row" style="margin-top:10px">' +
+          '<button class="zgp-b primary" data-git="redetect">重新检测</button>' +
+          '<button class="zgp-b" data-git="dlgit">打开下载页</button></div>'
+        const rd = gitBody.querySelector('[data-git="redetect"]')
+        if (rd) rd.onclick = function () { gitProbe = null; refreshGitSection().catch(function () {}) }
+        const dl = gitBody.querySelector('[data-git="dlgit"]')
+        if (dl) dl.onclick = async function () {
+          const ok = await zgsConfirm('即将打开外部窗口，CMark 窗口可能会被隐藏。装完 Git 后重新呼出 CMark 可继续设置。', '继续打开')
+          if (ok) { try { win.ztools.shellOpenExternal('https://git-scm.com/download/win') } catch (e) {} }
         }
-      }
-    }
-
-    const openWsBtn = $('s-ws-open')
-    if (openWsBtn) {
-      openWsBtn.onclick = function () {
-        try {
-          const p = win.__ZNOTES_WS
-          if (!p) return
-          if (win.ztools && typeof win.ztools.shellOpenPath === 'function') win.ztools.shellOpenPath(p)
-          else if (win.ztools && typeof win.ztools.shellOpenExternal === 'function') win.ztools.shellOpenExternal('file://' + p)
-        } catch (e) { toast('打开失败：' + (e && e.message), 'err') }
-      }
-    }
-
-    // ---- 版本控制（按仓库状态渲染两种形态）----
-    async function refreshVc () {
-      let st = {}
-      try {
-        // inspect() 不含分支，用 state() 才能拿到 branch
-        const r = await Promise.resolve(G && typeof G.state === 'function' ? G.state() : null)
-        st = (r && r.ok && r.data) ? r.data : ((G && typeof G.inspect === 'function') ? G.inspect() : {})
-      } catch (e) {}
-      const isRepo = !!(st && st.isRepo)
-      const initBox = $('s-vc-init')
-      const readyBox = $('s-vc-ready')
-      const kvEl = $('s-vc-kv')
-      const autoSw = $('s-auto')
-      if (autoSw) {
-        autoSw.disabled = !isRepo
-        if (!isRepo) autoSw.checked = false
-      }
-      // 这一段只回答"配置成什么样"：启用没有、绑没绑远端。
-      // 仓库根 / 分支 / 改动数属于运行诊断，统一放在面板底部的「运行状态」里，避免两处重复。
-      let rdKv = {}
-      try {
-        const ri = await Promise.resolve(G && typeof G.remoteInfo === 'function' ? G.remoteInfo() : null)
-        rdKv = (ri && ri.ok && ri.data) || {}
-      } catch (e) {}
-      if (kvEl) {
-        // 状态卡就是这一块的完整现状：状态 / 本地仓库路径 / 远程仓库地址
-        kvEl.innerHTML = isRepo
-          ? '<dt>状态</dt><dd><span class="zgs-dot"></span>已启用</dd>' +
-            '<dt>本地仓库</dt><dd class="mono zgs-kv-url">' + esc(st.repoRoot || '-') + '</dd>' +
-            '<dt>远程仓库</dt><dd' + (rdKv.hasRemote ? ' class="mono zgs-kv-url"' : '') + '>' +
-              (rdKv.hasRemote ? esc(rdKv.url || '-') : '未绑定') + '</dd>'
-          : '<dt>状态</dt><dd><span class="zgs-dot off"></span>未启用</dd>'
-      }
-      if (initBox) initBox.style.display = isRepo ? 'none' : ''
-      if (readyBox) readyBox.style.display = isRepo ? '' : 'none'
-
-      if (!isRepo) {
-        // 预填全局身份：否则新机器首次提交会失败，initRepo 会回滚刚建的 .git
-        let d = {}
-        try {
-          const id = await Promise.resolve(G && typeof G.identity === 'function' ? G.identity() : null)
-          d = (id && id.ok && id.data) || {}
-        } catch (e) {}
-        // 提交者身份沿用全局 git 配置，未启用时不再单独给输入框（要改去「提交」分区）
         return
       }
+      if (gitSwitch) gitSwitch.disabled = false
 
-      // 已初始化：只在本机 → 露「关联到远程」入口；已绑定 → 露「移除远端」
-      const rd = rdKv
-      const linkRow = $('s-vc-link-row')
-      const remoteBox = $('s-vc-remote-box')
-      if (linkRow) linkRow.style.display = rd.hasRemote ? 'none' : 'block'
-      if (remoteBox) remoteBox.style.display = rd.hasRemote ? 'block' : 'none'
-
-      // 「提交」分区抽屉里的身份回填：收起状态也先填好，展开就能看到当前值
-      const n2 = $('s-vc-name2')
-      const e2 = $('s-vc-email2')
-      if (n2 || e2) {
-        let d = {}
-        try {
-          const id = await Promise.resolve(G && typeof G.identity === 'function' ? G.identity() : null)
-          d = (id && id.ok && id.data) || {}
-        } catch (e) {}
-        if (n2 && !n2.value) n2.value = d.localName || ''
-        if (e2 && !e2.value) e2.value = d.localEmail || ''
-        const hint = $('s-vc-id-hint2')
-        if (hint) {
-          hint.textContent = (d.localName || d.localEmail)
-            ? '当前使用仓库内的身份，覆盖全局配置。'
-            : '当前沿用全局 git 配置：' + ([d.globalName, d.globalEmail].filter(Boolean).join(' / ') || '未配置')
-        }
-      }
-    }
-
-    // 渲染完成后拉一次版本控制状态，填充状态卡并按仓库状态切换两块形态
-    // （这行之前被误删，导致面板一直停在"读取中…"）
-    refreshVc().catch(function () {})
-
-    const initBtn = $('s-vc-init-btn')
-    if (initBtn) {
-      initBtn.onclick = async function () {
-        const branch = 'main'   // 分支固定 main
-        const ok = await zgsConfirm(
-          '在\n' + (win.__ZNOTES_WS || '-') + '\n初始化本地 git 仓库？\n\n' +
-          '现有笔记会被提交一次，内容不会被修改。\n' +
-          '之后可以在下面把本地仓库关联到远端。', '初始化')
-        if (!ok) return
-        initBtn.disabled = true
-        try { if (win.__znotesFlushSave) win.__znotesFlushSave() } catch (e) {}
-        let r = null
-        try {
-          r = await G.initRepo({
-            mode: 'local',
-            branch: branch
-          })
-        } catch (e) { r = { ok: false, message: (e && e.message) || String(e) } }
-        initBtn.disabled = false
-        if (r && r.ok) {
-          toast('仓库已初始化', 'ok')
-          try { if (G.rediscover) G.rediscover() } catch (e) {}
-          try { if (win.__zgpRefresh) win.__zgpRefresh() } catch (e) {}
-          render()
-        } else {
-          toast('初始化失败：' + ((r && r.message) || '未知原因'), 'err')
-        }
-      }
-    }
-
-    // 从远程仓库加载：弹窗填地址 → 校验连通性 + 空目录 → 通过才拉取
-    const adoptBtn = $('s-vc-adopt-btn')
-    if (adoptBtn) {
-      adoptBtn.onclick = async function () {
-        const url = await zgsPrompt(
-          '从远程仓库加载\n\n输入远端仓库地址。点「检测并继续」会先确认仓库可访问、当前工作区为空，通过后才开始拉取。',
-          'https://gitee.com/账号/仓库.git', '',
-          async function (v) {
-            const chk = await Promise.resolve(
-              G && typeof G.checkRemote === 'function' ? G.checkRemote(v) : { ok: true })
-            if (!chk || !chk.ok) {
-              return { ok: false, message: '仓库地址不可用：' + ((chk && chk.message) || '无法连接') }
-            }
-            const pre = G && typeof G.adoptPrecheck === 'function' ? G.adoptPrecheck() : null
-            if (pre && !pre.ok) {
-              const items = (pre.blocking && pre.blocking.length)
-                ? '：' + pre.blocking.slice(0, 3).join('、') + (pre.blocking.length > 3 ? ' 等' : '')
-                : ''
-              return { ok: false, message: '加载需要空工作区。' + (pre.reason || '') + items }
-            }
-            return { ok: true }
-          })
-        if (!url) return
-        toast('正在从远端拉取…', 'info')
-        let r = null
-        try {
-          r = await Promise.resolve(G.adoptRepo({ remoteUrl: url, branch: 'main' }))
-        } catch (e) {
-          r = { ok: false, message: (e && e.message) || String(e) }
-        }
-        if (r && r.ok) {
-          toast('已从远端加载完成', 'ok')
-          try { if (G.rediscover) G.rediscover() } catch (e) {}
-          try { if (win.__zgpRefresh) win.__zgpRefresh() } catch (e) {}
-          render()
-          setTimeout(function () {
-            try { if (win.__ZNOTES_REFRESH) win.__ZNOTES_REFRESH() } catch (e) {}
-          }, 600)
-        } else {
-          toast('加载失败：' + ((r && r.message) || '未知原因'), 'err')
-        }
-      }
-    }
-
-    // 「将本地仓库关联到远程」：弹窗填地址 → 校验通过才关窗并写入 remote
-    const linkBtn = $('s-vc-link-btn')
-    if (linkBtn) {
-      linkBtn.onclick = async function () {
-        let remoteBranches = null
-        const url = await zgsPrompt(
-          '将本地仓库关联到远程\n\n输入远端仓库地址。点「检测并继续」会先确认仓库可访问，通过后才写入配置。',
-          'https://gitee.com/账号/仓库.git', '',
-          async function (v) {
-            const chk = await Promise.resolve(
-              G && typeof G.checkRemote === 'function' ? G.checkRemote(v) : { ok: true })
-            if (!chk || !chk.ok) {
-              return { ok: false, message: '仓库地址不可用：' + ((chk && chk.message) || '无法连接') }
-            }
-            remoteBranches = (chk.branches || [])
-            return { ok: true }
-          })
-        if (!url) return
-        let r = null
-        try { r = await Promise.resolve(G.setRemote(url)) } catch (e) { r = { ok: false, message: (e && e.message) || '' } }
-        if (!r || !r.ok) {
-          toast('关联失败：' + ((r && r.message) || '未知原因'), 'err')
-          return
-        }
-        try { if (win.__zgpRefresh) win.__zgpRefresh() } catch (e) {}
-        // 远端是空仓库：光写 remote 等于什么也没同步，顺手把本地历史推上去，
-        // 否则用户会以为"关联成功"但远端正本还是空的。
-        if (remoteBranches && remoteBranches.length === 0) {
-          toast('远端是空仓库，正在推送本地历史…', 'info')
-          let pr = null
-          try { pr = await Promise.resolve(G.push()) } catch (e) { pr = { ok: false, message: (e && e.message) || '' } }
-          if (pr && pr.ok) toast('已关联到远程并推送完成', 'ok')
-          else toast('已关联，但推送失败：' + ((pr && pr.message) || '未知原因'), 'err')
-        } else {
-          toast('已关联到远程', 'ok')
-        }
-        render()
-      }
-    }
-
-    const saveRemote = async function (url, btn) {
-      if (!G || typeof G.setRemote !== 'function') { toast('git 服务不可用', 'err'); return }
-      let old = ''
+      const insp = (G && G.inspect) ? G.inspect() : { isRepo: false }
+      let data = {}
+      try { const st = await G.state(); data = (st && st.data) || {} } catch (e) {}
+      let remote = { hasRemote: false, url: '' }
+      try { const r = await G.remoteInfo(); if (r && r.ok) remote = r.data } catch (e) {}
+      const ws = win.__ZNOTES_WS || ''
+      let count = 0
       try {
-        const ri = await Promise.resolve(G.remoteInfo())
-        if (ri && ri.ok && ri.data && ri.data.hasRemote) old = ri.data.url
+        if (ws && fs.existsSync(ws)) {
+          count = fs.readdirSync(ws).filter(function (n) {
+            return ['.git', '.cmark', '.attachments', 'backup'].indexOf(n) < 0
+          }).length
+        }
       } catch (e) {}
-      if (url && old && url !== old) {
-        const ok = await zgsConfirm('把远端地址\n\n' + old + '\n\n改为\n\n' + url + '\n\n之后推送会进入新仓库。', '修改')
-        if (!ok) return
+
+      let enabled = readGitFlag(null)
+      if (enabled === null) { enabled = !!insp.isRepo; writeGitFlag(enabled) }
+      // 每次打开面板后的首次渲染校正一次：目录还不是仓库却开着开关 → 落盘为关闭，
+      // 这样「打开开关后没继续建仓就关面板」下次进来仍是关闭。
+      if (!gitGateDone) {
+        gitGateDone = true
+        if (!insp.isRepo && enabled) { enabled = false; writeGitFlag(false) }
       }
-      if (!url) {
-        const ok = await zgsConfirm('移除远端后，笔记只在本机提交，不再上传。', '移除')
-        if (!ok) return
-      }
-      if (btn) btn.disabled = true
-      let r = null
-      try { r = await G.setRemote(url) } catch (e) { r = { ok: false, message: (e && e.message) || '' } }
-      if (btn) btn.disabled = false
-      if (r && r.ok) {
-        toast(url ? '远程地址已保存' : '已移除远端', 'ok')
-        // 状态卡要跟着变（已绑定 ↔ 未绑定），否则界面上还是旧地址
-        render()
-        refreshVc().catch(function () {})   // 局部刷新，避免整块重渲染冲掉其它输入
+      if (gitSwitch) gitSwitch.checked = enabled
+      if (gitDrawer) gitDrawer.classList.toggle('open', enabled)
+      setSectionsDisabled(
+        !enabled || !insp.isRepo,
+        !enabled ? '请先开启 Git 集成' : '请先配置 Git 仓库'
+      )
+
+      const branch = data.branch || 'main'
+      const ahead = data.ahead || 0
+      const behind = data.behind || 0
+      const dirty = typeof data.dirty === 'number' ? data.dirty : -1
+
+      let kind = 'empty'
+      if (insp.isRepo && remote.hasRemote) kind = 'remote'
+      else if (insp.isRepo) kind = 'local'
+      else if (count > 0) kind = 'files'
+
+      let html = ''
+      if (kind === 'empty') {
+        html = '<div class="zgp-desc">目录是空的，建一个仓库就能开始记。</div>' +
+          '<div class="zgp-row" style="margin-top:10px">' +
+          '<button class="zgp-b primary" data-git="gh">使用 GitHub 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="gt">使用 Gitee 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="adopt">从远程仓库加载</button>' +
+          '<button class="zgp-b" data-git="local">仅本地仓库</button></div>'
+      } else if (kind === 'files') {
+        html = '<div class="zgp-desc">目录里有 ' + count + ' 项内容。初始化后这些文件成为第一个提交，内容不会被改动。</div>' +
+          '<div class="zgp-row" style="margin-top:10px">' +
+          '<button class="zgp-b primary" data-git="gh">使用 GitHub 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="gt">使用 Gitee 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="local">仅本地仓库</button></div>'
+      } else if (kind === 'local') {
+        html = '<dl class="zgs-kv"><dt>仓库</dt><dd>本地仓库</dd>' +
+          '<dt>分支</dt><dd>' + esc(branch) + '</dd>' +
+          '<dt>改动</dt><dd>' + (dirty >= 0 ? dirty + ' 个文件' : '读取失败') + '</dd></dl>' +
+          '<div class="zgp-desc">还没有远程仓库，笔记只存在这台机器上。</div>' +
+          '<div class="zgp-row" style="margin-top:10px">' +
+          '<button class="zgp-b primary" data-git="gh">使用 GitHub 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="gt">使用 Gitee 作为远程仓库</button>' +
+          '<button class="zgp-b" data-git="manual">手动填远程地址</button></div>'
       } else {
-        toast('操作失败：' + ((r && r.message) || '未知原因'), 'err')
+        html = '<dl class="zgs-kv"><dt>远程</dt><dd class="mono">' + esc(remote.url || '') + '</dd>' +
+          '<dt>分支</dt><dd>' + esc(branch) + '</dd>' +
+          '<dt>状态</dt><dd>' + (dirty >= 0 ? dirty + ' 处改动' : '读取失败') +
+          (ahead ? ' · 待推送 ' + ahead : '') + (behind ? ' · 待拉取 ' + behind : '') + '</dd></dl>' +
+          '<div class="zgp-row" style="margin-top:10px">' +
+          '<button class="zgp-b" data-git="push">推送</button>' +
+          '<button class="zgp-b" data-git="pull">拉取</button>' +
+          '<button class="zgp-b danger" data-git="unbind">移除远端</button>' +
+          '<button class="zgp-b" data-git="clear-token">清除已保存凭据</button></div>'
+      }
+      gitBody.innerHTML = html
+
+      const btns = gitBody.querySelectorAll('[data-git]')
+      for (let i = 0; i < btns.length; i++) {
+        const b = btns[i]
+        b.onclick = async function () {
+          const act = b.getAttribute('data-git')
+          if (act === 'gh') return openWizard('github')
+          if (act === 'gt') return openWizard('gitee')
+          if (act === 'adopt') return loadFromRemote()
+          if (act === 'local') {
+            b.disabled = true
+            const r = await G.initRepo({ mode: 'local' })
+            b.disabled = false
+            if (r && r.ok) { toast('已创建本地仓库'); afterGitChange() } else toast((r && r.message) || '初始化失败', 'err')
+            return
+          }
+          if (act === 'manual') {
+            const bindRemote = async function (u) {
+              const r = await G.initRepo({ mode: 'remote', remoteUrl: u, push: true })
+              if (r && r.ok) { toast('已绑定远程仓库'); afterGitChange(); return { ok: true } }
+              return { ok: false, message: (r && r.message) || '绑定失败' }
+            }
+            // 第二步：需要授权时让用户贴令牌，存进本工作区后再探测并绑定
+            const askToken = function (u, hint) {
+              setTimeout(function () {
+                zgsPrompt(
+                  '这个仓库需要授权访问\n把访问令牌粘贴到下面（GitHub PAT / Gitee 私人令牌 / 私有 GitLab token）',
+                  '粘贴访问令牌（GitHub PAT / Gitee 私人令牌 / 私有 GitLab token）', '',
+                  async function (tk) {
+                    const t = String(tk || '').trim()
+                    if (!t) return { ok: false, message: '请填写访问令牌' }
+                    const saved = G.setRemoteToken(t, u)
+                    if (saved && saved.ok === false) return { ok: false, message: saved.message || '保存令牌失败' }
+                    const p2 = await G.probeRemote(u, t)
+                    if (!p2 || !p2.ok) {
+                      return { ok: false, message: '令牌无效或没有写权限：' + ((p2 && p2.message) || '未知原因') }
+                    }
+                    const r = await bindRemote(u)
+                    if (r.ok) toast('已绑定远程仓库（凭据已保存在本机）')
+                    return r
+                  }
+                )
+              }, 140)
+              return { ok: true }
+            }
+            zgsPrompt('填写远程仓库地址', 'https://github.com/you/repo.git', '', async function (url) {
+              const u = String(url || '').trim()
+              if (!u) return { ok: false, message: '请填写远程仓库地址' }
+              // 先免授权探一下：公开仓库直接过，私有仓库会返回 auth 类错误
+              const probe = await G.probeRemote(u)
+              if (probe && probe.ok) return bindRemote(u)
+              const msg = String((probe && probe.message) || '')
+              // 注意：GitHub/Gitee 对「私有仓库无权限」和「仓库不存在」都返回 not found，
+              // 所以这里把 not found 也算进去 —— 否则私有仓库会直接走到绑定、只丢一句英文报错。
+              if (/auth|permission|denied|403|401|username|password|credentials|not found|does not exist/i.test(msg)) {
+                // 需要授权：关掉地址输入，接着弹令牌输入
+                askToken(u)
+                return { ok: true }
+              }
+              return bindRemote(u)
+            })
+            return
+          }
+          if (act === 'push' || act === 'pull') {
+            b.disabled = true
+            const r = act === 'push' ? await G.push() : await G.pull()
+            b.disabled = false
+            if (r && r.ok) { toast(act === 'push' ? '推送完成' : '拉取完成'); return }
+            const failMsg = (r && r.message) || (act === 'push' ? '推送失败' : '拉取失败')
+            if (isAuthError(failMsg)) { showAuthError(failMsg); return }
+            toast(failMsg, 'err')
+            return
+          }
+          if (act === 'clear-token') {
+            const ok = await zgsConfirm('清除本机保存的授权凭据后，推送需要重新授权；远端绑定关系保留。', '清除')
+            if (!ok) return
+            try { if (win.__CMARK_REMOTE && win.__CMARK_REMOTE.clear) win.__CMARK_REMOTE.clear() } catch (e) {}
+            toast('已清除本机保存的授权凭据')
+            afterGitChange()
+            return
+          }
+          if (act === 'unbind') {
+            const ok = await zgsConfirm('移除远端绑定后，笔记只保留在本机。', '移除')
+            if (!ok) return
+            const r = await G.setRemote('')
+            if (r && r.ok) { toast('已移除远端'); afterGitChange() } else toast((r && r.message) || '移除失败', 'err')
+          }
+        }
       }
     }
 
-    const remoteClearBtn = $('s-vc-remote-clear')
-    if (remoteClearBtn) {
-      remoteClearBtn.onclick = function () { saveRemote('', remoteClearBtn) }
+    if (gitSwitch) {
+      gitSwitch.onchange = function () {
+        writeGitFlag(!!gitSwitch.checked)
+        if (gitDrawer) gitDrawer.classList.toggle('open', !!gitSwitch.checked)
+        setSectionsDisabled(!gitSwitch.checked)
+        // 通知侧边栏操作栏与编辑区云端按钮同步置灰/隐藏
+        try { win.dispatchEvent(new CustomEvent('cmark-git-changed')) } catch (e) {}
+        refreshGitSection().catch(function () {})
+      }
     }
+    refreshGitSection().catch(function () {})
 
-    const idSaveBtn = $('s-vc-id-save')
-    if (idSaveBtn) {
-      idSaveBtn.onclick = async function () {
-        const n = (($('s-vc-name2') || {}).value || '').trim()
-        const e = (($('s-vc-email2') || {}).value || '').trim()
-        idSaveBtn.disabled = true
-        let r = null
-        try { r = await G.setIdentity(n, e) } catch (err) { r = { ok: false, message: (err && err.message) || '' } }
-        idSaveBtn.disabled = false
-        if (r && r.ok) toast('身份已保存', 'ok')
-        else toast('保存失败：' + ((r && r.message) || '未知原因'), 'err')
+    // ---------- 工作区（仓库根）/ 笔记目录 ----------
+    const fillDirs = function () {
+      const api = win.__CMARK || {}
+      const ws = win.__ZNOTES_WS || ''
+      let root = ''
+      try { root = api.repoDir ? api.repoDir() : '' } catch (e) {}
+      if (!root) root = ws
+      const rootEl = $('s-repo-dir')
+      if (rootEl) rootEl.textContent = root || '未设置'
+      const wsEl = $('s-ws')
+      if (wsEl) wsEl.textContent = ws || '未设置'
+    }
+    fillDirs()
+
+    const repoNames = { pick: '修改工作区', notes: '选择笔记目录' }
+    const runDirPick = function (kind) {
+      const api = win.__CMARK || {}
+      const fn = kind === 'pick' ? api.pickRepoDir : api.pickNotesDir
+      if (typeof fn !== 'function') return toast(repoNames[kind] + '功能不可用', 'err')
+      let r = null
+      try { r = fn.call(api) } catch (e) { return toast('打开目录选择失败：' + (e && e.message), 'err') }
+      if (!r || r.canceled) return
+      if (!r.ok) return toast(r.message || '操作失败', 'err')
+      toast(kind === 'pick' ? '工作区已切换' : '笔记目录已切换')
+      if (r.needReload) setTimeout(function () { try { win.location.reload() } catch (e) {} }, 400)
+    }
+    const repoBtn = $('s-repo-pick')
+    if (repoBtn) repoBtn.onclick = function () { runDirPick('pick') }
+    const notesBtn = $('s-notes-pick')
+    if (notesBtn) notesBtn.onclick = function () { runDirPick('notes') }
+
+
+    // 从远程仓库加载（要求空工作区）：校验连通性 + 目录状态后才拉取
+    async function loadFromRemote () {
+      const url = await zgsPrompt(
+        '从远程仓库加载\n\n输入远端仓库地址。点「检测并继续」会先确认仓库可访问、当前工作区为空，通过后才开始拉取。',
+        'https://gitee.com/账号/仓库.git', '',
+        async function (v) {
+          const chk = await Promise.resolve(G && typeof G.checkRemote === 'function' ? G.checkRemote(v) : { ok: true })
+          if (!chk || !chk.ok) return { ok: false, message: '仓库地址不可用：' + ((chk && chk.message) || '无法连接') }
+          const pre = G && typeof G.adoptPrecheck === 'function' ? G.adoptPrecheck() : null
+          if (pre && !pre.ok) {
+            const items = (pre.blocking && pre.blocking.length)
+              ? '：' + pre.blocking.slice(0, 3).join('、') + (pre.blocking.length > 3 ? ' 等' : '')
+              : ''
+            return { ok: false, message: '加载需要空工作区。' + (pre.reason || '') + items }
+          }
+          return { ok: true }
+        })
+      if (!url) return
+      toast('正在从远端拉取…', 'info')
+      let r = null
+      try { r = await Promise.resolve(G.adoptRepo({ remoteUrl: url, branch: 'main' })) } catch (e) { r = { ok: false, message: (e && e.message) || String(e) } }
+      if (r && r.ok) {
+        toast('已从远端加载完成', 'ok')
+        try { if (G.rediscover) G.rediscover() } catch (e) {}
+        refreshGitSection().catch(function () {})
+
+    // 暴露给外部一次性监听器：每次 render 更新引用，避免重复注册 addEventListener
+    win.__zgsRefreshGitSection = refreshGitSection
+
+        setTimeout(function () { try { if (win.__ZNOTES_REFRESH) win.__ZNOTES_REFRESH() } catch (e) {} }, 600)
+      } else {
+        toast('加载失败：' + ((r && r.message) || '未知原因'), 'err')
       }
     }
 
@@ -694,28 +774,9 @@ module.exports = function attachSettingsPanel (win) {
         autoSync: $('s-auto').checked,
         autoMode: $('s-mode') ? $('s-mode').value : 'interval',
         intervalMs: parseInt($('s-interval').value, 10),
-        onStopEditMinutes: parseInt($('s-stop').value, 10),
-        commitMessage: $('s-msg').value
+        onStopEditMinutes: parseInt($('s-stop').value, 10)
       })
       toast('设置已保存', 'ok')
-    }
-
-    // 自定义提交信息：开关控制抽屉展开，并决定用默认模板还是自定义模板
-    const DEFAULT_MSG = 'notes: 同步 {{datetime}}'
-    const msgCustom = $('s-msg-custom')
-    const msgDrawer = $('s-msg-drawer')
-    const msgInput = $('s-msg')
-    if (msgCustom && msgDrawer) {
-      const isCustom = !!(cfg.commitMessage && cfg.commitMessage !== DEFAULT_MSG)
-      msgCustom.checked = isCustom
-      msgDrawer.classList.toggle('open', isCustom)
-      if (!isCustom && msgInput && !msgInput.value) msgInput.value = DEFAULT_MSG
-      msgCustom.onchange = function () {
-        const on = msgCustom.checked
-        msgDrawer.classList.toggle('open', on)
-        if (!on && msgInput) msgInput.value = DEFAULT_MSG
-        save()
-      }
     }
 
     const autoSw = $('s-auto')
@@ -741,7 +802,6 @@ module.exports = function attachSettingsPanel (win) {
       const el = $(id)
       if (el) el.onchange = save
     })
-    if ($('s-msg')) $('s-msg').onblur = save
 
     // 仓库 / 状态信息（异步）
     let st = {}
@@ -751,34 +811,79 @@ module.exports = function attachSettingsPanel (win) {
     } catch (e) {}
     const repoEl = $('s-repo')
     if (repoEl) {
-      // 状态也用键值对齐，与上方版本控制保持一致
+      const inspNow = (G && G.inspect) ? G.inspect() : { isRepo: false }
+      let remoteNow = { hasRemote: false, url: '' }
+      try { const rr = await G.remoteInfo(); if (rr && rr.ok) remoteNow = rr.data } catch (e) {}
+      let lastRun = 0
+      try { const cc = G.config(); if (cc && cc.ok) lastRun = cc.data.lastRunAt || 0 } catch (e) {}
+      const fmtTime = function (t) {
+        if (!t) return ''
+        try {
+          const diff = Date.now() - t
+          if (diff < 0) return ''
+          if (diff < 60000) return '刚刚'
+          if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前'
+          if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前'
+          const d = new Date(t)
+          const p2 = function (n) { return n < 10 ? '0' + n : String(n) }
+          return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate())
+        } catch (e) { return '' }
+      }
+      const c2 = (G.config() || {}).data || {}
       let rows = ''
+      rows += '<dt>本地仓库</dt><dd>' + (inspNow.isRepo ? '已绑定' + (st.branch ? ' · ' + esc(st.branch) : '') : '未绑定') + '</dd>'
+      rows += '<dt>远程仓库</dt><dd>' + (remoteNow.hasRemote ? '已绑定' : '未绑定') + '</dd>'
+      if (inspNow.isRepo) {
+        rows += '<dt>上次同步</dt><dd>' + (c2.lastRunAt ? new Date(c2.lastRunAt).toLocaleString('zh-CN') : '从未执行') + '</dd>'
+        if (c2.lastAutoResult) {
+          const ar = c2.lastAutoResult
+          rows += '<dt>最近结果</dt><dd>' + (ar.ok ? '成功' : '失败') + (ar.message ? ' · ' + esc(ar.message) : '') + '</dd>'
+          if (ar.error) rows += '<dt>错误</dt><dd>' + esc(ar.error) + '</dd>'
+        }
+      }
+      if (typeof st.dirty === 'number') rows += '<dt>未提交</dt><dd>' + st.dirty + ' 个文件</dd>'
       if (G.scopeRel) rows += '<dt>笔记子目录</dt><dd class="mono">' + esc(G.scopeRel) + '</dd>'
-      if (st.branch) rows += '<dt>当前分支</dt><dd class="mono">' + esc(st.branch) + '</dd>'
-      if (typeof st.dirty === 'number') rows += '<dt>未提交改动</dt><dd>' + st.dirty + ' 个文件</dd>'
       repoEl.innerHTML = '<dl class="zgs-kv">' + rows + '</dl>'
     }
-    const c2 = (G.config() || {}).data || {}
-    let irows = '<dt>上次同步</dt><dd>' + (c2.lastRunAt ? new Date(c2.lastRunAt).toLocaleString('zh-CN') : '从未执行') + '</dd>'
-    if (c2.lastAutoResult) {
-      const ar = c2.lastAutoResult
-      irows += '<dt>最近结果</dt><dd>' + (ar.ok ? '成功' : '失败') + (ar.message ? ' · ' + esc(ar.message) : '') + '</dd>'
-      if (ar.error) irows += '<dt>错误</dt><dd>' + esc(ar.error) + '</dd>'
-      if (ar.at) irows += '<dt>发生时间</dt><dd>' + new Date(ar.at).toLocaleString('zh-CN') + '</dd>'
-    }
-    const infoEl = $('s-info')
-    if (infoEl) infoEl.innerHTML = '<dl class="zgs-kv">' + irows + '</dl>'
   }
 
   // ---------- 开关 ----------
+  // ZTools 的窗口策略是失焦即隐藏：打开资源管理器 / 外部授权页 / 原生目录选择框之后，
+  // 插件窗口会被宿主收起来。这里用 sessionStorage 记住面板是否开着，
+  // 窗口重新可见（或插件被重新呼出）时自动恢复，用户不用每次都重新点一遍。
+  const OPEN_KEY = 'cmark-settings-open'
+  function readOpenFlag () {
+    try { return win.sessionStorage.getItem(OPEN_KEY) === '1' } catch (e) { return false }
+  }
+  function writeOpenFlag (on) {
+    try { win.sessionStorage.setItem(OPEN_KEY, on ? '1' : '0') } catch (e) {}
+  }
+
   function open () {
     if (root.classList.contains('open')) return
     root.classList.add('open')
+    writeOpenFlag(true)
     render()
   }
   function close () {
     root.classList.remove('open')
+    writeOpenFlag(false)
   }
+
+  // 窗口从隐藏变回可见时恢复面板
+  try {
+    doc.addEventListener('visibilitychange', function () {
+      if (doc.visibilityState === 'visible' && readOpenFlag() && !root.classList.contains('open')) open()
+    })
+  } catch (e) {}
+  // 补一条：宿主重新进入插件时也恢复（部分场景不触发 visibilitychange）
+  try {
+    if (win.ztools && typeof win.ztools.onPluginEnter === 'function') {
+      win.ztools.onPluginEnter(function () { if (readOpenFlag()) open() })
+    }
+  } catch (e) {}
+  // 首次挂载时若上次会话面板是开的，直接打开
+  if (readOpenFlag()) setTimeout(function () { try { open() } catch (e) {} }, 80)
   function toggle () {
     if (root.classList.contains('open')) close()
     else open()
@@ -842,6 +947,13 @@ module.exports = function attachSettingsPanel (win) {
   win.__zgsOpen = open
   win.__zgsClose = close
   win.__zgsIsOpen = function () { return root.classList.contains('open') }
+  // 建仓向导完成 / 开关变更时重算仓库状态（只注册一次；render 会被反复调用）
+  try {
+    win.addEventListener('cmark-git-changed', function () {
+      try { if (typeof win.__zgsRefreshGitSection === 'function') win.__zgsRefreshGitSection() } catch (e) {}
+    })
+  } catch (e) {}
+
   win.__zgsRender = render
   logBoot('done, btn=' + !!doc.getElementById('znotes-sbtn'))
 }

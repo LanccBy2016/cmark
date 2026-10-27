@@ -32,7 +32,6 @@ export function MoreMenu() {
   const content = useNotes((s) => s.content)
   const setMessage = useNotes((s) => s.setMessage)
   const sourceMode = useNotes((s) => s.sourceMode)
-  const toggleSourceMode = useNotes((s) => s.toggleSourceMode)
   const toolbarHidden = useNotes((s) => s.toolbarHidden)
   const toggleToolbar = useNotes((s) => s.toggleToolbar)
   const bodyFontSize = useNotes((s) => s.bodyFontSize)
@@ -90,18 +89,6 @@ export function MoreMenu() {
 
       {open ? (
         <div className="more-menu">
-          <button
-            type="button"
-            className="more-item"
-            onClick={() => {
-              setOpen(false)
-              toggleSourceMode()
-            }}
-          >
-            {sourceMode ? '关闭源码模式' : '源码模式'}
-            <span className="more-kbd">Ctrl+Alt+/</span>
-          </button>
-
           {!sourceMode ? (
             <>
               <button

@@ -24,11 +24,10 @@ module.exports = function (win, findInstance) {
     #${ID} button{padding:6px 14px;border-radius:6px;border:1px solid rgba(128,128,128,.36);
       background:transparent;color:inherit;font-size:12.5px;cursor:pointer;}
     #${ID} button.primary{background:#3f7ef7;border-color:#3f7ef7;color:#fff;}
-    @media (prefers-color-scheme: dark){
-      #${ID} .zrn-card{background:#2b2f36;color:#e6e6e6;box-shadow:0 16px 40px rgba(0,0,0,.5);}
-      #${ID} input{border-color:rgba(255,255,255,.22);}
-      #${ID} button{border-color:rgba(255,255,255,.2);}
-    }
+    :root[data-theme='dark'] #${ID} .zrn-card{background:#2b2f36;color:#e6e6e6;box-shadow:0 16px 40px rgba(0,0,0,.5);}
+    :root[data-theme='dark'] #${ID} input{border-color:rgba(255,255,255,.22);}
+    :root[data-theme='dark'] #${ID} button{border-color:rgba(255,255,255,.2);}
+
     `
     try { (doc.head || doc.body || doc.documentElement).appendChild(st) } catch (e) {}
   }

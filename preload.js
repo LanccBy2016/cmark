@@ -12,8 +12,22 @@
  *
  * 另加 window.__CMARK 作为本版本新增的控制面（配置读写、选目录、重扫）。
  */
+// 宿主适配必须在一切之前：uTools 只注入 window.utools，ZTools 只注入 window.ztools，
+// 补齐之后下面的代码才能统一用 window.ztools.xxx（两套 API 名字一致）
+try { require('./preload/host').applyHostShim() } catch (e) {}
+
 const path = require('path')
+
+/** 启动期模块挂载失败时记一笔，方便用户/开发者直接在控制台看原因 */
+function bootError(label, err) {
+  try {
+    window.__CMARK_BOOT_ERRORS = (window.__CMARK_BOOT_ERRORS || []).concat(
+      label + ': ' + ((err && err.stack) || (err && err.message) || String(err))
+    )
+  } catch (e) {}
+}
 const fs = require('fs')
+const { exportDocCss, exportDocColors } = require('./preload/export-css')
 const os = require('os')
 
 const CFG_PATH = path.join(os.homedir(), '.cmark-config.json')
@@ -65,6 +79,86 @@ function saveConfig(patch) {
 
 let config = loadConfig()
 
+/* ---------------- 主题：light / dark / system ----------------
+ * 用户在设置里选，配置存在 ~/.cmark-config.json 的 theme 字段。
+ * 这里在 document-start 阶段就把 data-theme 写到 <html>，
+ * 避免首帧先渲染浅色再跳深色。
+ */
+const THEME_MODES = ['light', 'dark', 'system']
+
+function themeMode () {
+  const m = (config || {}).theme
+  return THEME_MODES.indexOf(m) >= 0 ? m : 'system'
+}
+
+function resolveTheme (mode) {
+  if (mode === 'light' || mode === 'dark') return mode
+  try {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+  } catch (e) {
+    return 'light'
+  }
+}
+
+let themeRetryArmed = false
+
+function applyTheme () {
+  const mode = themeMode()
+  const resolved = resolveTheme(mode)
+  let applied = false
+  try {
+    const el = document && document.documentElement
+    if (el) {
+      el.setAttribute('data-theme', resolved)
+      el.setAttribute('data-theme-mode', mode)
+      el.style.colorScheme = resolved
+      applied = true
+    }
+  } catch (e) {}
+  // document-start 阶段 <html> 可能还不存在（页面重载时尤其明显）：
+  // 之前这里静默失败后不再重试，结果 data-theme 永远没写上，
+  // 界面回退浅色，而设置面板读配置仍显示「深色」——两边对不上。
+  if (!applied && !themeRetryArmed) {
+    themeRetryArmed = true
+    try {
+      if (document && typeof document.addEventListener === 'function') {
+        document.addEventListener('DOMContentLoaded', function () { themeRetryArmed = false; applyTheme() }, { once: true })
+      }
+    } catch (e) {}
+    setTimeout(function () { themeRetryArmed = false; try { applyTheme() } catch (e) {} }, 80)
+  }
+  try {
+    if (window && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('cmark-theme', { detail: { mode: mode, resolved: resolved } }))
+    }
+  } catch (e) {}
+  return { mode: mode, resolved: resolved }
+}
+
+const themeApi = {
+  get: function () { return { mode: themeMode(), resolved: resolveTheme(themeMode()) } },
+  set: function (mode) {
+    if (THEME_MODES.indexOf(mode) < 0) mode = 'system'
+    config = saveConfig({ theme: mode })
+    return applyTheme()
+  },
+  apply: applyTheme
+}
+
+try {
+  if (window) window.__CMARK_THEME = themeApi
+} catch (e) {}
+
+applyTheme()
+
+// 跟随系统时，系统深浅色切换要实时生效
+try {
+  const mq = matchMedia('(prefers-color-scheme: dark)')
+  const onChange = function () { if (themeMode() === 'system') applyTheme() }
+  if (mq.addEventListener) mq.addEventListener('change', onChange)
+  else if (mq.addListener) mq.addListener(onChange)
+} catch (e) {}
+
 // 工作区未设置或不存在时，退到 ~/Documents/CMark，不弹任何框
 let workspace = config.workspace
 if (!workspace || !fs.existsSync(workspace)) {
@@ -75,12 +169,48 @@ if (!workspace || !fs.existsSync(workspace)) {
   } catch (e) {}
 }
 
+/* ---------------- Git 集成开关 ----------------
+ * 存配置文件而不是 localStorage：插件跑在 file:// origin 下，localStorage 可能直接抛 SecurityError
+ * （被 try/catch 静默吞掉，表现就是「开关点了没生效、状态读不到」）。
+ * 这里给渲染层与注入脚本一个同步读写的入口，set 时广播事件让各界面同步。
+ */
+const wsPrefs = require('./preload/ws-prefs.js')
+
+function currentWs () {
+  try {
+    if (config && config.workspace) return config.workspace
+    // workspace 在下方才声明；这里用 typeof 兜住 TDZ，读取时它通常已初始化
+    return typeof workspace === 'string' ? workspace : ''
+  } catch (e) { return '' }
+}
+
+const gitApi = {
+  // 返回 true / false / null（null = 该工作区还没设置过）
+  // 存在「按工作区」的 prefs.json 里：换笔记库不会沿用上一个库的开关
+  get: function () {
+    const p = wsPrefs.read(currentWs())
+    if (typeof p.gitEnabled === 'boolean') return p.gitEnabled
+    // 兼容上一版写在全局配置里的值
+    if (config && typeof config.gitEnabled === 'boolean') return config.gitEnabled
+    return null
+  },
+  set: function (on) {
+    wsPrefs.patch(currentWs(), { gitEnabled: !!on })
+    try {
+      if (window) window.dispatchEvent(new CustomEvent('cmark-git-changed', { detail: { enabled: !!on } }))
+    } catch (e) {}
+    return !!on
+  }
+}
+try { if (window) window.__CMARK_GIT = gitApi } catch (e) {}
+
 /* ---------------- 挂载数据层 ---------------- */
 // ndb.js 的第二个参数是"能读到 workspace 字段的 JSON 路径"
 try {
   require('./preload/ndb.js')(window, CFG_PATH)
 } catch (e) {
   console.error('[cmark] ndb 挂载失败', e)
+  bootError('ndb', e)
 }
 
 /* ---------------- 挂载版本控制 ---------------- */
@@ -88,6 +218,7 @@ try {
   require('./preload/git-service.js')(window, workspace)
 } catch (e) {
   console.error('[cmark] git 服务挂载失败', e)
+  bootError('git-service', e)
 }
 
 /* ---------------- 挂载导出/附件/剪贴板 ---------------- */
@@ -95,6 +226,7 @@ try {
   window.services = require('./preload/services.js')(window)
 } catch (e) {
   console.error('[cmark] services 挂载失败', e)
+  bootError('services', e)
   window.services = {}
 }
 
@@ -151,18 +283,35 @@ try {
   require('./preload/git-panel.js')(window, workspace)
 } catch (e) {
   console.error('[cmark] git-panel 挂载失败', e)
+  bootError('git-panel', e)
 }
 
+// 每个模块单独 try：之前三个挤在一个 try 里，前面任一个抛错，设置面板就整块不挂载，
+// 表现就是「点设置没反应」（uTools 里尤其容易踩到）。
+try {
+  require('./preload/remote-setup.js')(window)
+} catch (e) {
+  console.error('[cmark] remote-setup 挂载失败', e)
+  bootError('remote-setup', e)
+}
+try {
+  require('./preload/remote-wizard.js')(window)
+} catch (e) {
+  console.error('[cmark] remote-wizard 挂载失败', e)
+  bootError('remote-wizard', e)
+}
 try {
   require('./preload/settings-panel.js')(window)
 } catch (e) {
   console.error('[cmark] settings-panel 挂载失败', e)
+  bootError('settings-panel', e)
 }
 
 try {
   require('./preload/rename-note.js')(window, window.__znotesFindInstance)
 } catch (e) {
   console.error('[cmark] rename-note 挂载失败', e)
+  bootError('rename-note', e)
 }
 
 /* ---------------- 控制面 ---------------- */
@@ -223,7 +372,7 @@ window.__CMARK = {
     return this._writeNoteFile(dir, name, content, attachments || [], 'md', false)
   },
 
-  writeHtmlFile(dir, name, html, attachments, withKatex, selfContained) {
+  writeHtmlFile(dir, name, html, attachments, withKatex, selfContained, theme) {
     let css = ''
     // 自包含快照（每个元素都内联了 computed style）不能再套 github-markdown.css，
     // 那套样式会覆盖内联结果，导出的东西又和编辑区不一样了
@@ -236,10 +385,10 @@ window.__CMARK = {
       } catch (e) {}
     }
     const katexLink = withKatex ? '<link rel="stylesheet" href="./katex.min.css">' : ''
+    // 导出跟随当前主题；selfContained 快照已内联深/浅色值，壳背景必须匹配，
+    // 否则深色文字配白底几乎不可读
     const full = '<!doctype html>\n<html>\n<head>\n<meta charset="utf-8"/>\n<title>' + (name || '') + '</title>\n' +
-      katexLink + '\n<style>\nhtml, body { margin: 0; padding: 0; background-color: #ffffff; }\n' +
-      '.markdown-body { box-sizing: border-box; min-width: 200px; max-width: 980px; margin: 0 auto; padding: 45px; }\n' +
-      '@media (max-width: 767px) { .markdown-body { padding: 15px; } }\n' + css + '\n</style>\n</head>\n<body>\n' +
+      katexLink + '\n<style>\n' + exportDocCss(theme) + '\n' + css + '\n</style>\n</head>\n<body>\n' +
       '<article class="markdown-body">\n' + String(html || '').trim() + '\n</article>\n</body>\n</html>'
     const extra = Array.isArray(attachments) ? attachments.slice() : []
     if (withKatex) {
@@ -251,7 +400,7 @@ window.__CMARK = {
   },
 
   /** 用隐藏窗口渲染后截图/打印成 PDF（V1.0.0 的做法） */
-  exportFile(type, html, css, cb, outDir) {
+  exportFile(type, html, css, cb, outDir, theme) {
     if (!window.ztools || typeof window.ztools.createBrowserWindow !== 'function') {
       cb(new Error('当前宿主没有 createBrowserWindow，无法导出 ' + type))
       return
@@ -278,7 +427,30 @@ window.__CMARK = {
         try {
           let buf
           await new Promise((r) => setTimeout(r, 50))
-          if (css) await win.webContents.insertCSS(css)
+          // Electron 的 insertCSS 会插到 <head> 最前面，被 export-file/index.html
+          // 自带的 background:#fff 覆盖（深色导出曾经导出白底）。改成把 <style>
+          // 追加到 body 末尾 + 直接内联背景，一定压得住。
+          const colors = exportDocColors(theme)
+          await win.webContents.executeJavaScript(
+            '(() => {' +
+            // export-file/index.html 会加载 github-markdown.css（浅色配色），
+            // 它的 .markdown-body / td / blockquote 规则特异性比我们的高，
+            // 深色导出会出现「深底 + 深字」和「白底表格」。直接禁用它，
+            // 全部改用 exportDocCss 这套随主题的样式。
+            '  Array.from(document.querySelectorAll("link[rel=stylesheet]")).forEach(function (l) {' +
+            '    if (l.href && l.href.indexOf("github-markdown") >= 0) l.disabled = true;' +
+            '  });' +
+            '  const css = ' + JSON.stringify(exportDocCss(theme) + '\n' + (css || '')) + ';' +
+            '  const st = document.createElement("style");' +
+            '  st.id = "__cmark-export-theme";' +
+            '  st.textContent = css;' +
+            '  document.body.appendChild(st);' +
+            '  document.documentElement.style.background = ' + JSON.stringify(colors.bg) + ';' +
+            '  document.body.style.background = ' + JSON.stringify(colors.bg) + ';' +
+            '  document.body.style.color = ' + JSON.stringify(colors.fg) + ';' +
+            '  return "ok";' +
+            '})()'
+          )
           await win.webContents.executeJavaScript(
             'document.querySelector(".markdown-body").innerHTML = ' + JSON.stringify(String(html || ''))
           )
@@ -362,6 +534,85 @@ window.__CMARK = {
       workspaceExists: fs.existsSync(workspace),
       metaDir: (window.__ZNOTES && window.__ZNOTES.metaDir) || null,
     })
+  },
+
+  /**
+   * 工作区（仓库根）。
+   * 语义：工作区永远是 git 仓库根，笔记可以放在它下面的任意子目录（甚至就是根）。
+   * 没显式配置时回退到已探测的仓库根，再回退到当前笔记目录（兼容老数据）。
+   */
+  repoDir() {
+    if (config && config.repoDir) return config.repoDir
+    try {
+      const st = window.__znotesGit && window.__znotesGit.inspect ? window.__znotesGit.inspect() : null
+      if (st && st.repoRoot) return st.repoRoot
+    } catch (e) {}
+    return workspace
+  },
+
+  /** 修改工作区（仓库根）：只校验可写，不搬任何文件 */
+  pickRepoDir() {
+    let dir
+    try {
+      dir = window.ztools.showOpenDialog({
+        title: '选择工作区目录（git 仓库根）',
+        defaultPath: this.repoDir(),
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    } catch (e) {
+      return { ok: false, message: '打开目录选择器失败：' + e.message }
+    }
+    if (!dir) return { ok: false, canceled: true }
+    if (Array.isArray(dir)) dir = dir[0]
+    try {
+      const probe = path.join(dir, '.cmark-write-test')
+      fs.writeFileSync(probe, 'ok')
+      fs.unlinkSync(probe)
+    } catch (e) {
+      return { ok: false, message: '这个目录不可写，请换一个' }
+    }
+    config = saveConfig({ repoDir: dir })
+    // 原来的笔记目录不在新工作区里（或没设置）→ 直接落到工作区根
+    const ws = config.workspace || workspace
+    let rel = ''
+    try { rel = path.relative(dir, ws) } catch (e) { rel = '..' }
+    if (!ws || rel.startsWith('..') || path.isAbsolute(rel)) {
+      workspace = dir
+      config = saveConfig({ workspace: dir, initialized: true })
+    }
+    return { ok: true, repoDir: dir, workspace: workspace, needReload: true }
+  },
+
+  /** 选择笔记目录：必须落在工作区（仓库根）之内，可以为根本身 */
+  pickNotesDir() {
+    const root = this.repoDir()
+    let dir
+    try {
+      dir = window.ztools.showOpenDialog({
+        title: '选择笔记目录（工作区内的子目录）',
+        defaultPath: root || workspace,
+        properties: ['openDirectory', 'createDirectory'],
+      })
+    } catch (e) {
+      return { ok: false, message: '打开目录选择器失败：' + e.message }
+    }
+    if (!dir) return { ok: false, canceled: true }
+    if (Array.isArray(dir)) dir = dir[0]
+    let rel = ''
+    try { rel = path.relative(root || dir, dir) } catch (e) { rel = '..' }
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      return { ok: false, message: '笔记目录必须在工作区（' + (root || '未设置') + '）之内' }
+    }
+    try {
+      const probe = path.join(dir, '.cmark-write-test')
+      fs.writeFileSync(probe, 'ok')
+      fs.unlinkSync(probe)
+    } catch (e) {
+      return { ok: false, message: '这个目录不可写，请换一个' }
+    }
+    workspace = dir
+    config = saveConfig({ workspace: dir, initialized: true })
+    return { ok: true, workspace: dir, noteRel: rel, needReload: true }
   },
 
   /** 更换工作区：只校验可写，不搬任何文件 */
@@ -1431,6 +1682,10 @@ try {
  * ZTools 工具接口（对应 plugin.json 里的 tools 段）
  * AI 侧通过这些工具读写笔记、把 Markdown 渲染成图片/PDF
  * ================================================================== */
+// MCP 工具注册（ZTools 专有）。
+// plugin.json 里的 tools 声明已移除：插件本身不需要 MCP —— 其他 AI 直接读写磁盘上的 .md 即可。
+// 代码保留，若将来要恢复 MCP，把 tools 声明加回 plugin.json 就能生效；
+// uTools 没有 registerTool，这里的 return 会让它在 uTools 下自动跳过。
 ;(function registerTools() {
   const z = window.ztools
   if (!z || typeof z.registerTool !== 'function') return

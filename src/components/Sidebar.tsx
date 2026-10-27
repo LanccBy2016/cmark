@@ -694,7 +694,7 @@ export function Sidebar({
 
       {/* 底部设置条 43px */}
       <div className="footer">
-        <button title="设置：笔记目录、自动同步、提交选项" onClick={onOpenSettings}>
+        <button onClick={onOpenSettings}>
           <IconGear />
           设置
         </button>

@@ -13,6 +13,7 @@ import { KEYS } from 'platejs'
 import type { PlateElementProps, PlateLeafProps } from 'platejs/react'
 import katex from 'katex'
 import { Diagram } from './plate-diagram'
+import { openEquationDialog } from './EquationDialog'
 import { getTableAbove } from '@platejs/table'
 import { useNotes } from '../store/notes'
 import { useEffect, useRef, useState } from 'react'
@@ -189,10 +190,29 @@ export function placeBesideVoid(editor: unknown, element: unknown, dir: 'before'
  * 用绝对定位，不占文档流，也不参与 Slate 的节点结构。
  */
 export function VoidGapBars() {
+  // 判定带压在块的边缘上，mousedown 落到这里时编辑器会先按坐标把选区设进块里，
+  // 于是操作栏闪一下（active 变 true）再被 click 的插入处理顶掉（active 变 false）。
+  // 在 mousedown 就 preventDefault + 拦冒泡，选区根本不动，只留 click 去插内容。
+  const hold = (ev: React.SyntheticEvent) => {
+    ev.preventDefault()
+    ev.stopPropagation()
+  }
   return (
     <>
-      <span className="void-gap void-gap-top" contentEditable={false} aria-hidden="true" />
-      <span className="void-gap void-gap-bottom" contentEditable={false} aria-hidden="true" />
+      <span
+        className="void-gap void-gap-top"
+        contentEditable={false}
+        aria-hidden="true"
+        onMouseDown={hold}
+        onPointerDown={hold}
+      />
+      <span
+        className="void-gap void-gap-bottom"
+        contentEditable={false}
+        aria-hidden="true"
+        onMouseDown={hold}
+        onPointerDown={hold}
+      />
     </>
   )
 }
@@ -262,6 +282,9 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
   const locked = useNotes((s) => s.locked)
   const onVoidGapClick = useVoidGapClick(element)
   const [langOpen, setLangOpen] = useState(false)
+  // 图表块（mermaid/echarts）默认只显示渲染结果，源码折叠；
+  // 图形右上角 hover 出按钮，点击展开/隐藏源码
+  const [showSource, setShowSource] = useState(false)
   const [menuAt, setMenuAt] = useState({ top: 0, left: 0 })
   const langBtnRef = useRef<HTMLButtonElement>(null)
   const langMenuRef = useRef<HTMLDivElement>(null)
@@ -318,13 +341,20 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
 
   return (
     <div
-      className={'code-block-wrap void-wrap' + (selected ? ' active' : '')}
+      className={
+        'code-block-wrap void-wrap' +
+        (selected ? ' active' : '') +
+        // 图表在"只显示渲染结果"状态下，代码块本身是隐藏的，
+        // 复制/语言按钮挂在 wrap 上不受影响，会孤零零留在那里 —— 这里同步标记
+        (isDiagram && code.trim() && !showSource ? ' is-source-hidden' : '') +
+        // 语言下拉是 portal 到 body 的，鼠标移到面板上就离开了 wrap，
+        // hover 一断两个按钮就消失；打开面板期间用这个类把按钮钉住
+        (langOpen ? ' is-lang-open' : '')
+      }
       onClick={onVoidGapClick}
     >
       <VoidGapBars />
-      {/* 语言切换只在编辑状态出现，未激活时仅保留右侧复制图标（对齐 V1.0.0） */}
-      {selected ? (
-        <>
+      {/* 语言切换与复制按钮同显同隐：都随代码块 hover 出现（不再要求光标落进来） */}
           <button
             ref={langBtnRef}
             type="button"
@@ -349,7 +379,19 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
               }
               try {
                 const r = langBtnRef.current?.getBoundingClientRect()
-                if (r) setMenuAt({ top: r.bottom + 1, left: r.left })
+                const wrapEl = langBtnRef.current?.closest('.code-block-wrap') as HTMLElement | null
+                const copyEl = wrapEl?.querySelector(':scope > .code-editor-copy') as HTMLElement | null
+                const cr = copyEl?.getBoundingClientRect()
+                const MENU_W = 150 // 与 .code-lang-list 的 width 一致
+                const GAP = 6
+                if (r && cr) {
+                  // 下拉框放在复制按钮左侧：右边缘贴住复制按钮左边，纵向从语言按钮底部展开
+                  let left = cr.left - MENU_W - GAP
+                  if (left < 8) left = Math.max(8, r.left)
+                  setMenuAt({ top: r.bottom + 4, left })
+                } else if (r) {
+                  setMenuAt({ top: r.bottom + 4, left: r.left })
+                }
               } catch (err) {
                 console.error('[code-lang rect]', err)
               }
@@ -358,8 +400,6 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
           >
             {curLang}
           </button>
-        </>
-      ) : null}
 
       <button
         type="button"
@@ -377,7 +417,7 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
         </svg>
       </button>
 
-      {langOpen && selected && !locked
+      {langOpen && !locked
         ? createPortal(
             <div
               ref={langMenuRef}
@@ -415,13 +455,50 @@ export function CodeBlockElement({ attributes, children, element }: PlateElement
           )
         : null}
 
-      <pre {...attributes} className="code-editor" data-lang={el.lang || ''}>
+      <pre
+        {...attributes}
+        className={
+          'code-editor' + (isDiagram && code.trim() ? (showSource ? '' : ' is-source-hidden') : '')
+        }
+        data-lang={el.lang || ''}
+      >
         {children}
       </pre>
 
       {isDiagram && code.trim() ? (
         <div className="diagram-box" contentEditable={false}>
-          <Diagram kind={lang as 'mermaid' | 'echarts'} code={code} />
+          {/* 按钮挂在整个渲染区（diagram-box）上，而不是图形画布上：
+              图形居中时画布比渲染区窄，挂在画布上会跑到图形右上角去 */}
+          <button
+            type="button"
+            className={'diagram-code-toggle' + (showSource ? ' is-on' : '')}
+            contentEditable={false}
+            onMouseDown={(ev) => ev.preventDefault()}
+            onClick={(ev) => {
+              ev.stopPropagation()
+              setShowSource((v) => !v)
+            }}
+            title={showSource ? '隐藏源码' : '显示源码'}
+          >
+            {/* 图案与表格操作栏的「显示源码」一致：</> 而不是 <> */}
+            <svg
+              viewBox="0 0 24 24"
+              width="15"
+              height="15"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="m18 16 4-4-4-4" />
+              <path d="m6 8-4 4 4 4" />
+              <path d="m14.5 4-5 16" />
+            </svg>
+          </button>
+          <div className={'diagram-canvas' + (lang === 'echarts' ? ' is-full' : '')}>
+            <Diagram kind={lang as 'mermaid' | 'echarts'} code={code} />
+          </div>
         </div>
       ) : null}
     </div>
@@ -489,6 +566,66 @@ export function CodeSyntaxLeaf({ attributes, children, leaf }: PlateLeafProps) {
 export function TableElement({ attributes, children, element }: PlateElementProps) {
   const locked = useNotes((s) => s.locked)
   const onVoidGapClick = useVoidGapClick(element)
+  // 操作栏悬浮：自己算位置并直接写 DOM 样式。
+  // 不用 sticky（受父容器高度限制，表格一短就钉不住），
+  // 也不用 React state（每次 scroll 都重渲染，视觉上会闪）。
+  const barRef = useRef<HTMLDivElement>(null)
+  // 浮层展开期间操作栏必须保持可见：点按钮会让选区离开表格、active 变 false，
+  // 否则整条操作栏（连同保存按钮）会当场消失
+  const [codeOpen, setCodeOpen] = useState(false)
+
+  useEffect(() => {
+    const bar = barRef.current
+    const wrap = bar?.closest('.table-wrap') as HTMLElement | null
+    if (!bar || !wrap) return
+    let raf = 0
+
+    const reset = () => {
+      bar.classList.remove('is-pinned')
+      bar.style.position = ''
+      bar.style.top = ''
+      bar.style.left = ''
+      bar.style.width = ''
+    }
+
+    const upd = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        let sc: HTMLElement | null = wrap.parentElement
+        while (sc && sc !== document.body) {
+          const cs = getComputedStyle(sc)
+          if (/(auto|scroll)/.test(cs.overflowY)) break
+          sc = sc.parentElement
+        }
+        if (!sc || sc === document.body) {
+          reset()
+          return
+        }
+        const wr = wrap.getBoundingClientRect()
+        const sr = sc.getBoundingClientRect()
+        const barH = bar.offsetHeight || 30
+        // 表格顶部滚过容器顶部、且表格还没整块滚出去时，把操作栏钉在容器顶部
+        if (wr.top < sr.top && wr.bottom > sr.top + barH) {
+          bar.classList.add('is-pinned')
+          bar.style.position = 'fixed'
+          bar.style.top = Math.round(sr.top) + 'px'
+          bar.style.left = Math.round(wr.left) + 'px'
+          bar.style.width = Math.round(wr.width) + 'px'
+        } else {
+          reset()
+        }
+      })
+    }
+
+    upd()
+    window.addEventListener('scroll', upd, true)
+    window.addEventListener('resize', upd)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener('scroll', upd, true)
+      window.removeEventListener('resize', upd)
+    }
+  }, [])
 
   // 光标落在这个表格里时才显示操作栏（V1.0.0 是 caption 的 hidden 属性）
   const active = useEditorSelector((ed: any) => {
@@ -506,13 +643,31 @@ export function TableElement({ attributes, children, element }: PlateElementProp
   return (
     // 外面必须再包一层：border-collapse: collapse 下 <table> 自己的 padding
     // 会被单元格吃掉，elementFromPoint 落在 td 上，判定带等于不存在。
-    <div className="table-wrap void-wrap" onClick={onVoidGapClick}>
+    <div
+      className={'table-wrap void-wrap' + ((active || codeOpen) && !locked ? ' is-bar-open' : '')}
+      onClick={onVoidGapClick}
+    >
       <VoidGapBars />
+      {/* 操作栏必须放在 <table> 外面：table-caption 上的 position: sticky 在 Chrome 里
+          不生效（实测滚出视口后 top 变成 -21），放进 .table-wrap 里的普通 div 才能钉住顶部。
+          只读状态下不显示，避免误触。 */}
+      {/* 常驻挂载、只切显隐：条件渲染会导致点按钮时（选区变化 -> active=false）
+          整条工具栏卸载，表格代码浮层的状态一起丢掉、刚打开就消失 */}
+      {/* 只在光标位于本表格内时显示（不常显）；只读状态下也隐藏 */}
+      <div
+        ref={barRef}
+        className={'table-sticky-bar' + ((active || codeOpen) && !locked ? '' : ' is-hidden')}
+        contentEditable={false}
+        aria-hidden={!active || locked}
+        /* 操作栏在 .table-wrap 内部，而 wrap 上挂了 onVoidGapClick（点上方/下方插入段落）；
+           不拦冒泡的话，点「显示源码」这类按钮会顺带触发表格上方的插入操作 */
+        onClick={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        <TableToolbar tableNode={element} onOpenChange={setCodeOpen} />
+      </div>
       <table {...attributes} className="table">
-        {/* 只读状态下不显示操作栏，避免误触改了不该改的东西 */}
-        <caption className="table-caption" hidden={!active || locked} contentEditable={false}>
-          <TableToolbar />
-        </caption>
         <tbody>{children}</tbody>
       </table>
     </div>
@@ -741,16 +896,16 @@ export function ImageElement({ attributes, children, element }: PlateElementProp
 export function EquationElement({ attributes, children, element }: PlateElementProps) {
   const el = element as { texExpression?: string; value?: string }
   const editor = useEditorRef()
+  const tex = el.texExpression || el.value || ''
   let html = ''
   try {
-    html = katex.renderToString(el.texExpression || el.value || '', { throwOnError: false, displayMode: true })
+    html = katex.renderToString(tex, { throwOnError: false, displayMode: true })
   } catch (e) {
     html = ''
   }
 
   // 对齐 V1.0.0：公式本身是 contentEditable=false 的渲染结果，
-  // 点击只是把光标定位到它旁边（V1.0.0 是定位到前一个 $ 符号），
-  // 不弹任何编辑浮层。要改 LaTeX 就切源码模式直接改 $$...$$。
+  // 点击只是把光标定位到它旁边。改 LaTeX 走右上角按钮弹窗。
   const selectNode = () => {
     const p = findPathOf(editor, element)
     if (!p) return
@@ -759,6 +914,25 @@ export function EquationElement({ attributes, children, element }: PlateElementP
     } catch (err) {
       console.error('[equation-select]', err)
     }
+  }
+
+  const edit = () => {
+    const path = findPathOf(editor, element)
+    openEquationDialog({
+      tex,
+      title: '编辑公式',
+      onApply: (next) => {
+        if (!path) return
+        const ed = editor as unknown as {
+          tf?: { setNodes?: (props: unknown, opts: unknown) => void }
+        }
+        try {
+          ed.tf?.setNodes?.({ texExpression: next }, { at: path })
+        } catch (err) {
+          console.error('[equation-edit]', err)
+        }
+      },
+    })
   }
 
   return (
@@ -770,9 +944,36 @@ export function EquationElement({ attributes, children, element }: PlateElementP
         ev.stopPropagation()
         selectNode()
       }}
-      title="点击选中；修改公式请切到源码模式（Ctrl+Alt+/）"
     >
-      <div className="math-render" dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="math-canvas">
+        {/* 和图表一致：悬浮才出现按钮，点开是弹窗编辑 */}
+        <button
+          type="button"
+          className="math-toggle"
+          contentEditable={false}
+          onMouseDown={(ev) => ev.preventDefault()}
+          onClick={(ev) => {
+            ev.stopPropagation()
+            edit()
+          }}
+          title="编辑公式"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="13"
+            height="13"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.9"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="m9 6-6 6 6 6" />
+            <path d="m15 6 6 6-6 6" />
+          </svg>
+        </button>
+        <div className="math-render" dangerouslySetInnerHTML={{ __html: html }} />
+      </div>
       {children}
     </div>
   )
@@ -788,9 +989,45 @@ export function InlineEquationElement({ attributes, children, element }: PlateEl
   } catch (e) {
     html = ''
   }
+  const editor = useEditorRef()
+  const edit = () => {
+    const path = findPathOf(editor, element)
+    openEquationDialog({
+      tex,
+      title: '编辑行内公式',
+      onApply: (next) => {
+        if (!path) return
+        const ed = editor as unknown as {
+          tf?: { setNodes?: (props: unknown, opts: unknown) => void }
+        }
+        try {
+          ed.tf?.setNodes?.({ texExpression: next }, { at: path })
+        } catch (err) {
+          console.error('[inline-equation-edit]', err)
+        }
+      },
+    })
+  }
+
   return (
     <span {...attributes} className="math-inline" contentEditable={false}>
-      <span dangerouslySetInnerHTML={{ __html: html }} />
+      <span className="math-inline-body" dangerouslySetInnerHTML={{ __html: html }} />
+      <button
+        type="button"
+        className="math-inline-toggle"
+        contentEditable={false}
+        onMouseDown={(ev) => ev.preventDefault()}
+        onClick={(ev) => {
+          ev.stopPropagation()
+          edit()
+        }}
+        title="编辑行内公式"
+      >
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m9 6-6 6 6 6" />
+          <path d="m15 6 6 6-6 6" />
+        </svg>
+      </button>
       {children}
     </span>
   )

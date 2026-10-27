@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.0 - 2026-10-27
+
+同一份产物同时支持 ZTools 与 uTools，宿主自动识别，不再需要分叉维护。
+
+- 新增主题设置：浅色 / 深色 / 跟随系统，主界面、设置面板、Git 面板一起切换
+- 新增一键建仓：GitHub 设备码授权、Gitee 私人令牌，自动创建仓库、绑定远程并推送首次提交
+- 自动适配宿主：`preload/host.js` 在启动最早期识别 `window.utools` / `window.ztools` 并互为别名，宿主晚注入也不会崩
+- 支持 uTools 上架：`plugin.json` 补齐 `homepage` / `platform`，新增 `npm run pack:upx` 产出 uTools 插件包
+- AI 生成适配两个宿主：模型字段归一化（ZTools 用 `value`、uTools 用 `id`），模型列表为空时回退默认模型
+- 手填远程地址支持私有仓库：先免授权探测，需要授权时引导填访问令牌，令牌只存本机
+- 修复 uTools 下 preload 不执行导致设置与 Git 面板打不开（`app/` 就近声明 `type: commonjs`）
+- 修复文档里的裸邮箱、裸网址被写成尖括号或 Markdown 链接，源码不再自动插入转义符
+- 表格：操作栏只在光标位于表格内时出现，滚动吸附不再闪烁；支持直接编辑表格源码；列对齐可持久化
+- 拉取、推送、同步的成败提示改为插件底部浮窗，不再弹 Windows 系统通知
+- 版本回溯的确认提示去掉并不存在的“改动前自动备份”说法
+- 配色抽成设计令牌，深色下侧边栏、编辑区、面板统一，不再出现半深半浅
+- README 补充 npm 与 uTools 安装方式（`@lancc/cmark`）
+- 发布改为 GitHub Actions + npm Trusted Publishing，产物带 provenance 签名
+
 ## 1.1.0 - 2026-10-26
 
 首个公开发布版本。

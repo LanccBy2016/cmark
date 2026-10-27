@@ -5,7 +5,7 @@ Obsidian 的轻量替代。本地 Markdown 笔记，文件是你的，版本用 
 跑在 [ZTools](https://github.com/ztools) 插件体系里。
 
 <p align="center">
-  <a href="docs/screenshot.png">看一篇覆盖全部语法的笔记，导出成长图的样子</a>
+  <a href="https://github.com/LanccBy2016/cmark/blob/main/docs/screenshot.png">看一篇覆盖全部语法的笔记，导出成长图的样子</a>
 </p>
 
 ## 为什么用它
@@ -124,11 +124,22 @@ CMark 不跟 Obsidian 抢生态。它只解决一件更窄的事：
 
 ## 安装
 
-### 方式一：插件市场（推荐）
+### 方式一：npm（推荐）
+
+ZTools 3.3.0-beta 起内置了 npm 安装入口，不用等市场审核、也不用导入安装包：
+
+1. ZTools → 设置 → 已安装插件 → **从 npm 安装**
+2. 填包名 `@lancc/cmark`（带 scope，`@lancc/` 不能省）
+3. **不要**勾「使用国内镜像」：官方源可直连，勾了可能因镜像同步延迟装到旧版本
+4. 装完重启 ZTools，搜索框输入 `cmark` 或 `markdown` 打开
+
+升级走同一个入口，重装即覆盖，笔记与配置都保留。
+
+### 方式二：插件市场
 
 ZTools 里搜 `markdown` 或 `cmark`，装上即用。
 
-### 方式二：离线安装包（GitHub Releases）
+### 方式三：离线安装包（GitHub Releases）
 
 适合市场审核期间、内网环境，或者想锁定某个版本。
 
@@ -144,7 +155,7 @@ ZTools 里搜 `markdown` 或 `cmark`，装上即用。
 
 两条渠道装的是同一个插件位（插件名相同），后装的会覆盖先装的，**插件数据（配置、历史）保留**。
 
-### 方式三：从源码构建
+### 方式四：从源码构建
 
 ```bash
 npm install
@@ -161,10 +172,31 @@ node scripts/pack-zpx.mjs        # 产出 release/cmark-<版本>.zpx
 node scripts/pack-zpx.mjs --zip  # 同时产出 .zip
 ```
 
+### 方式五：uTools
+
+同一份产物同时支持 uTools 和 ZTools —— `preload/host.js` 会自动识别宿主（`window.utools` / `window.ztools`）并补齐缺失的那个全局对象，其余代码不用分支。
+
+```bash
+npm run build
+node scripts/pack.mjs       # 准备 app/（plugin.json 的 main 指向 index.html）
+npm run pack:upx            # 产出 release/cmark-<版本>.upx
+```
+
+上架走的是**导入源码工程**，不是传 upx：
+
+- uTools 开发者中心 → 插件详情 → 「导入源码工程」→ 选 `app/plugin.json`（`app/` 本身就是完整插件工程：`plugin.json` 的 `main` 指向 `index.html`，同级有 `index.html` / `preload.js` / `preload/` / `logo.png` / `assets/`，10.6 MB，不含 node_modules 与 src）
+- 导入后在开发者工具里点「打包」生成上架用的 upx；`npm run pack:upx` 产出的 `.upx` 适合本地分发/离线测试
+
+改完代码要让 uTools 里的工程更新：`npm run build && node scripts/pack.mjs`（`app/` 会被重建，开发者工具会自动重载）。
+
+宿主识别结果可在控制台查看：`window.__CMARK_HOST`（`utools` / `ztools` / `browser`）。
+
 ## 首次使用
 
 1. 选笔记目录（可以就是你已有的 Markdown 目录）
-2. 在左侧「版本控制」里初始化仓库：填远程地址（GitHub / Gitee 都行），或只建本地仓库
+2. 建仓库有两种方式：
+   - **一键建仓**（设置 → 一键建仓）：GitHub 点「授权建仓」，浏览器里输入 8 位码即完成；Gitee 粘一个私人令牌。向导会自动建仓、绑定远程并推送首次提交。
+   - 手动：在左侧「版本控制」里初始化仓库，填远程地址（GitHub / Gitee 都行），或只建本地仓库
 3. 打开「定时提交并推送」，插件会按设定间隔自动 commit + push
 
 笔记就是磁盘上的 `.md` 文件，没有私有格式。`.cmark/` 只存排序、只读标记、图片附件这类元数据，随仓库一起提交。图片尺寸以 `<img ... width="320">` 写回 Markdown 本身，Obsidian / Typora / VS Code 打开同一份文件看到的大小一致。

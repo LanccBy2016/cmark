@@ -25,14 +25,16 @@ type Svc = {
     html: string,
     extra?: string[],
     withKatex?: boolean,
-    selfContained?: boolean
+    selfContained?: boolean,
+    theme?: 'light' | 'dark'
   ) => { ok?: boolean; canceled?: boolean; message?: string } | undefined
   exportFile?: (
     type: 'pdf' | 'image',
     html: string,
     extraCss: string,
     cb: (err: Error | null, path?: string) => void,
-    outDir?: string
+    outDir?: string,
+    theme?: 'light' | 'dark'
   ) => void
   dialogSaveExportFile?: (tmpPath: string, name: string, ext: string) => void
   getKatexCss?: () => string
@@ -67,6 +69,11 @@ const SNAPSHOT_STRIP = [
   '.math-edit-pop',
   '.diagram-err',
   '.search-hit-mark',
+  '.diagram-code-toggle',
+  '.math-toggle',
+  '.math-source',
+  '.math-inline-toggle',
+  '.table-code-panel',
 ]
 
 /** 需要内联的样式属性：只留影响视觉的，避免把布局/交互状态也带出去 */
@@ -358,6 +365,10 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
   if (!rel) return
   const S = svc()
   const baseName = rel.split('/').pop()!.replace(/\.(md|markdown)$/i, '') || '未命名'
+  // 导出跟随当前主题：深色主题就该导出深色文档，
+  // 否则深色文字配白色壳，和编辑区看到的完全是两回事
+  const theme: 'light' | 'dark' =
+    document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light'
 
   setBusy?.(kind)
   try {
@@ -411,7 +422,7 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
       }
       // selfContained = true：快照已内联全部样式，不能再套 github-markdown.css，
       // 否则那套样式会覆盖内联结果，导出的东西又和编辑区不一样
-      const r = S.writeHtmlFile?.(dir, baseName, html, [], hasMath, true)
+      const r = S.writeHtmlFile?.(dir, baseName, html, [], hasMath, true, theme)
       if (!r) {
         setMessage('导出失败：宿主未实现 writeHtmlFile', 3600)
         return
@@ -455,7 +466,7 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
           return
         }
         resolve()
-      })
+      }, undefined, theme)
     })
   } catch (e) {
     setMessage('导出失败：' + ((e as Error)?.message || ''), 3600)

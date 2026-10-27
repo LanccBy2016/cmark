@@ -13,7 +13,8 @@ on:
         default: false
 
 permissions:
-  contents: read
+  # 创建 GitHub Release 需要写权限
+  contents: write
   # Trusted Publishing（OIDC）与 provenance 都需要 id-token
   id-token: write
 
@@ -79,3 +80,23 @@ jobs:
         if: github.event_name == 'push' || inputs.dry_run == false
         working-directory: .npm-publish
         run: npm publish --provenance --access public
+
+      # uTools 的 .upx 就是 zip，直接把 app/ 打成包，作为 Release 附件
+      - name: 打包 uTools 插件包
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          cd app
+          zip -qr "../cmark-${ver}.upx" .
+          cd ..
+          ls -lh "cmark-${ver}.upx"
+
+      - name: 创建 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver=$(node -p "require('./package.json').version")
+          gh release create "v${ver}" "cmark-${ver}.upx" \
+            --title "CMark ${ver}" \
+            --generate-notes

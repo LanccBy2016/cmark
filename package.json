@@ -1,6 +1,6 @@
 {
   "name": "cmark",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "CMark —— 本地 Markdown 笔记，用 git 同步",
@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "pack": "node scripts/pack.mjs",
-    "pack:npm": "node scripts/prepare-npm.mjs"
+    "pack:npm": "node scripts/prepare-npm.mjs",
+    "pack:upx": "node scripts/pack-upx.mjs"
   },
   "dependencies": {
     "@platejs/basic-nodes": "^53.0.0",
