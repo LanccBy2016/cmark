@@ -40,6 +40,16 @@ apps/mobile          Capacitor（阶段 4）
 | `preload/branch-bar / rename-note / ws-prefs / export-css` | 463 | 分别进 core / ui |
 | `preload.js` | 1870 | 拆成 host-contract + 各端 bootstrap（每端 ~150 行） |
 
+## 2.1 仓库内元数据文件命名（2026-10 定案）
+
+工作区里的配置**不放 `.txt`**：`.cmark/order`、`.cmark/locked`、`.cmark/near`（均无扩展名）。
+原因：工作区经常被 Obsidian / Typora / VSCode 当成笔记库打开，`.txt` 会被这些工具按普通文本
+扫描、索引出来；无扩展名的文件不会被任何按后缀关联的编辑器捡走，同时仍是纯文本（git diff 逐行、
+冲突可手工合并，比 JSON 更适合排序数据）。
+
+兼容：读取时优先新文件，找不到就回落老的 `order.txt` / `locked.txt` / `near.txt`；
+第一次写入时把内容写进新文件并删除旧文件，用户不需要手动迁移。
+
 ## 3. 分期（每步都能发版）
 
 | 阶段 | 内容 | 完成判据 |

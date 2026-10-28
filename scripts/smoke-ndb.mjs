@@ -24,6 +24,9 @@ put('日记/2026-10-27.md', '# 明天')
 put('项目/设计/配色.md', '# 配色')
 put('.git/HEAD', 'ref')
 put('assets/a.png', 'png')
+// 老库兼容：.cmark 下旧版带 .txt 后缀的元数据（新版改成无扩展名）
+put('.cmark/order.txt', '# 日记\nnote/日记/2026-10-27.md\nnote/日记/2026-10-26.md\n')
+put('.cmark/near.txt', '')
 
 process.env.ZNOTES_WORKSPACE = lib
 const install = require('../preload/ndb.js')
@@ -50,6 +53,20 @@ else {
   if (!design) fails.push('folder/项目 下缺「设计」')
   else if (design.id !== '设计') fails.push(`子目录 id 应为裸名，实际=${design.id}`)
 }
+
+// 旧 order.txt 的目录内排序必须被读进来：27 日排在 26 日之前（文件系统序是反的）
+const diaryDoc = win.__NDB.get('folder/日记')
+const diaryOrder = (diaryDoc?.children || []).map((c) => c.id)
+if (diaryOrder[0] !== 'note/日记/2026-10-27.md') {
+  fails.push(`旧版 order.txt 排序没生效: ${JSON.stringify(diaryOrder)}`)
+}
+
+// 写一次 near 标记 → 应生成 .cmark/near（无扩展名）并删掉旧 near.txt
+win.__ZNOTES.setNoteNear('note/README.md', true)
+const nearNew = fs.existsSync(path.join(lib, '.cmark/near'))
+const nearOld = fs.existsSync(path.join(lib, '.cmark/near.txt'))
+if (!nearNew) fails.push('.cmark/near 未生成（写入没走新文件名）')
+if (nearOld) fails.push('.cmark/near.txt 未被迁移删除')
 
 const rootDoc = win.__NDB.get('__root__')
 if (!rootDoc) fails.push('取不到 __root__')

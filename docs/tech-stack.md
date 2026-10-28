@@ -38,7 +38,7 @@
 | 鸿蒙 | **暂不支持，不做** | Tauri 官方无鸿蒙；无设备无需求，等真有人用再单独评估 ArkTS 壳 | ⛔ 砍掉 |
 | 插件宿主 | **ZTools / uTools 双壳**（不合并） | plugin.json、feature code、注入时机、审核材料都不同 | ✅ 现有 |
 | Git | **契约单引擎：isomorphic-git 为默认**；桌面/插件可切 `system` | 移动端与鸿蒙不可能调系统 git；单引擎才能行为一致 | 🟡 契约已定，实现待迁 |
-| 存储 | **纯文件**：`.md` + `~/.cmark-config.json` + `.cmark/order.txt` | 无数据库，用户可随时带走；与插件版互通 | ✅ 兼容 |
+| 存储 | **纯文件**：`.md` + `~/.cmark-config.json` + `.cmark/order`（无扩展名）+ `.cmark/locked` / `.cmark/near` | 无数据库、用户可随时带走；工作区常被当笔记库打开，元数据不留 `.txt` 后缀以免被别的编辑器扫出来；老库的 `.txt` 读到即迁移 | ✅ 兼容 |
 | 导出 | 长图走**前端 html-to-image**；PDF/HTML 由壳侧编排 | Tauri 无 capturePage，前端方案统一两端 | ⬜ |
 | 测试 | **vitest**（core 用例 + 一致性回归）；沿用 `scripts/test-e2e.mjs` | 核心跨端一致靠测试兜住 | ✅ core 6/6 |
 | CI | **GitHub Actions**：core 测试 + desktop 矩阵（win / mac-arm64 / mac-x64） | macOS 无法从 Windows 交叉编译，CI 是唯一无 Mac 路径 | ✅ |

@@ -13,7 +13,7 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
-// 扫描规则 / 建树排序 / order.txt 解析统一由 @cmark/core 提供（与 Tauri、移动端共用同一份实现）
+// 扫描规则 / 建树排序 / 排序文件解析统一由 @cmark/core 提供（与 Tauri、移动端共用同一份实现）
 // 产物由 `npm run build:core` 生成（scripts/build-core.mjs，esbuild 打包成 CJS）
 const core = require('./cmark-core.cjs')
 
@@ -611,40 +611,51 @@ module.exports = function installNDB(win, externalCfg) {
   }
 
   // ---------------- 笔记附加状态（只读等，不进正文，避免污染 md） ----------------
-  // 存成 .cmark/locked.txt：一行一个已锁定笔记 id 的哈希，文件为空/没有该行就是未锁定。
+  // 存成 .cmark/locked（**无扩展名**）：一行一个已锁定笔记 id 的哈希，文件为空/没有该行就是未锁定。
+  // 为什么不留 .txt：工作区常被 Obsidian/Typora/VSCode 之类当笔记库打开，.txt 会被这些工具
+  // 当成普通文本扫描/索引出来；无扩展名文件不会被任何按后缀关联的编辑器捡走。
   // 这里只回答"这个 id 是否锁定"，读取时按 id 现算哈希比对即可，
   // 不需要保留可读路径，也不怕文件名里出现特殊字符。
-  const LOCKEDTXT = path.join(REPO_META, 'locked.txt')
+  const LOCKEDTXT = path.join(REPO_META, 'locked')
+  const LOCKED_LEGACY = path.join(REPO_META, 'locked.txt')   // 老库兼容，读到就迁移
   // 设为全局搜索（ZTools feature）的笔记也记在这里，同样只存哈希
-  const NEARTXT = path.join(REPO_META, 'near.txt')
+  const NEARTXT = path.join(REPO_META, 'near')
+  const NEAR_LEGACY = path.join(REPO_META, 'near.txt')
   const idHash = function (id) {
     return crypto.createHash('md5').update('cmark-lock:' + String(id)).digest('hex').slice(0, 12)
   }
-  function readHashFile (file) {
+  function readHashFile (file, legacy) {
     const set = new Set()
-    try {
-      fs.readFileSync(file, 'utf8').split(/\r?\n/).forEach(function (line) {
+    let raw = null
+    try { raw = fs.readFileSync(file, 'utf8') } catch (e) {
+      if (legacy) { try { raw = fs.readFileSync(legacy, 'utf8') } catch (e2) {} }
+    }
+    if (raw != null) {
+      raw.split(/\r?\n/).forEach(function (line) {
         const t = line.trim()
         if (t && t.charAt(0) !== '#') set.add(t)
       })
-    } catch (e) {}
+    }
     return set
   }
-  function writeHashFile (file, set) {
+  function writeHashFile (file, set, legacy) {
     try {
       mk(REPO_META)
       const arr = Array.from(set || []).filter(Boolean).sort()
       const next = arr.length ? arr.join('\n') + '\n' : ''
-      let prev = ''
+      let prev = null
       try { prev = fs.readFileSync(file, 'utf8') } catch (e) {}
-      // 内容没变不写盘，避免插件启动就刷新 mtime、把工作区标成"已修改"
-      if (prev !== next) fs.writeFileSync(file, next, 'utf8')
+      // 新文件已是最新 → 什么都不做（避免启动就刷新 mtime 把工作区标成"已修改"）
+      if (prev === next) return
+      fs.writeFileSync(file, next, 'utf8')
+      // 老库里的 .txt 顺手迁走（内容已写入新文件）
+      if (legacy) { try { if (fs.existsSync(legacy)) fs.unlinkSync(legacy) } catch (e) {} }
     } catch (e) {}
   }
   function readNoteState () {
     return {
-      readonlyHashes: readHashFile(LOCKEDTXT),
-      nearHashes: readHashFile(NEARTXT)
+      readonlyHashes: readHashFile(LOCKEDTXT, LOCKED_LEGACY),
+      nearHashes: readHashFile(NEARTXT, NEAR_LEGACY)
     }
   }
   function setNoteFlag (id, flag, on) {
@@ -653,11 +664,12 @@ module.exports = function installNDB(win, externalCfg) {
     const h = idHash(id)
     const set = flag === 'readonly' ? st.readonlyHashes : st.nearHashes
     const file = flag === 'readonly' ? LOCKEDTXT : NEARTXT
+    const legacy = flag === 'readonly' ? LOCKED_LEGACY : NEAR_LEGACY
     const has = set.has(h)
     if (!!on === has) return           // 状态没变就不写盘
     if (on) set.add(h)
     else set.delete(h)
-    writeHashFile(file, set)
+    writeHashFile(file, set, legacy)
   }
 
   // ---------------- 上手引导状态 ----------------
@@ -672,9 +684,10 @@ module.exports = function installNDB(win, externalCfg) {
   }
 
   // ---------------- 目录树排序（拖拽结果持久化） ----------------
-  // 磁盘只决定"有哪些节点"，人工拖拽决定的"顺序"记在 .cmark/order.txt，
+  // 磁盘只决定"有哪些节点"，人工拖拽决定的"顺序"记在 .cmark/order（无扩展名，见下），
   // 每次扫描按它重排，于是重开插件顺序不变。新出现的节点不在表里，排到末尾。
-  // 顺序存成纯文本 .cmark/order.txt，一行一项，段头写目录：
+  // 顺序存成纯文本 .cmark/order（**无扩展名**：工作区常被当笔记库打开，.txt 会被
+  // Obsidian/Typora/VSCode 之类按普通文本扫描出来），一行一项，段头写目录：
   //
   //   # 根目录
   //   IWAN
@@ -687,10 +700,15 @@ module.exports = function installNDB(win, externalCfg) {
   // 行 = 条目的 id（笔记 note/…、目录裸名），和内存里排序用的键完全一致，
   // 读写两端都不做转换。段头仍保留：每个目录各有自己的内部顺序，必须分组。
   // 排序的改动没人会去读 diff，所以这里优先"少转换、少出错"，不追求可读性。
-  const ORDERTXT = path.join(REPO_META, 'order.txt')
+  const ORDERTXT = path.join(REPO_META, 'order')
+  const ORDER_LEGACY = path.join(REPO_META, 'order.txt')   // 老库兼容，读到就迁移
   function readTreeOrder () {
+    let raw = null
+    try { raw = fs.readFileSync(ORDERTXT, 'utf8') } catch (e) {
+      try { raw = fs.readFileSync(ORDER_LEGACY, 'utf8') } catch (e2) {}
+    }
+    if (raw == null) return {}
     try {
-      const raw = fs.readFileSync(ORDERTXT, 'utf8')
       return core.parseOrder(raw)   // 解析规则在 core（根目录置顶、# 分段），与其它端一致
     } catch (e) { return {} }
   }
@@ -718,10 +736,15 @@ module.exports = function installNDB(win, externalCfg) {
         })
       })
       const next = lines.join('\n') + '\n'
-      let prev = ''
-      try { prev = fs.readFileSync(ORDERTXT, 'utf8') } catch (e) {}
+      let prev = null
+      try { prev = fs.readFileSync(ORDERTXT, 'utf8') } catch (e) {
+        try { prev = fs.readFileSync(ORDER_LEGACY, 'utf8') } catch (e2) {}
+      }
       // 内容没变就不写：否则每次扫描都刷新 mtime，git 工作区会一直挂着"已修改"
-      if (prev !== next) fs.writeFileSync(ORDERTXT, next, 'utf8')
+      if (prev === next) return
+      fs.writeFileSync(ORDERTXT, next, 'utf8')
+      // 老库的 order.txt 迁走（同内容已写入新文件）
+      try { if (fs.existsSync(ORDER_LEGACY)) fs.unlinkSync(ORDER_LEGACY) } catch (e) {}
     } catch (e) {}
   }
 
@@ -1196,7 +1219,7 @@ module.exports = function installNDB(win, externalCfg) {
         }
         if (!prefix || key.startsWith(prefix)) out.push(doc)
       }
-            // 根级顺序按用户拖拽记录（order.txt 的根段）重排
+            // 根级顺序按用户拖拽记录（排序文件的根段）重排
       if (out.length && (!prefix || prefix === 'folder/')) {
         const seq = new Map()
         ;(TREE_ORDER[''] || []).forEach((x, idx) => seq.set('folder/' + String(x).replace(/^folder\//, ''), idx))

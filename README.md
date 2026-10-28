@@ -207,7 +207,7 @@ npm run pack:upx            # 产出 release/cmark-<版本>.upx
 
 - 在 ZTools 搜索框直接输入标题回车，一步打开那篇笔记（不会只停在面板上）
 - 也可以在 ZTools 设置里给它配全局快捷键
-- 再点一次按钮即取消，`.cmark/near.txt` 里记着哪些笔记挂过
+- 再点一次按钮即取消，`.cmark/near` 里记着哪些笔记挂过
 
 ## 卸载
 
