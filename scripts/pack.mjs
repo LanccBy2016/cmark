@@ -30,7 +30,9 @@ fs.copyFileSync(path.join(root, 'preload.js'), path.join(dist, 'preload.js'))
 const preloadDir = path.join(root, 'preload')
 fs.mkdirSync(path.join(dist, 'preload'), { recursive: true })
 for (const f of fs.readdirSync(preloadDir)) {
-  if (f.endsWith('.js') || f === 'package.json') {
+  // .cjs 必须一起带上：preload/ndb.js 现在 require('./cmark-core.cjs')（core 打包产物），
+  // 漏掉它插件运行时会直接 require 失败、整个 preload 不执行
+  if (f.endsWith('.js') || f.endsWith('.cjs') || f === 'package.json') {
     fs.copyFileSync(path.join(preloadDir, f), path.join(dist, 'preload', f))
   }
 }

@@ -13,6 +13,9 @@ const fs = require('fs')
 const os = require('os')
 const path = require('path')
 const crypto = require('crypto')
+// 扫描规则 / 建树排序 / order.txt 解析统一由 @cmark/core 提供（与 Tauri、移动端共用同一份实现）
+// 产物由 `npm run build:core` 生成（scripts/build-core.mjs，esbuild 打包成 CJS）
+const core = require('./cmark-core.cjs')
 
 module.exports = function installNDB(win, externalCfg) {
   // ---------------- 工作区（优先级：环境变量 > 外部配置 > asar 内默认）----------------
@@ -451,7 +454,7 @@ module.exports = function installNDB(win, externalCfg) {
   // 认 .md 与 .markdown 两种后缀；标题一律去掉后缀，否则 .markdown 文件的
   // 标题会带着 ".markdown" 尾巴，改名判断也会误判。
   const MD_EXT = /\.(md|markdown)$/i
-  const stripExt = (rel) => path.basename(String(rel)).replace(MD_EXT, '')
+  const stripExt = (rel) => core.noteTitleFromName(path.basename(String(rel)))
   // 遍历上限：不忽略任何目录（磁盘上有什么就显示什么），但目录/笔记数量
   // 超过阈值时停止深挖并标记，由界面提示「目录过多」，避免选到工程目录时
   // 每次扫描都卡住整个插件。
@@ -459,22 +462,16 @@ module.exports = function installNDB(win, externalCfg) {
   const MAX_FILES = 20000
   let LAST_TRUNCATED = false
 
+  // 遍历交给 core.scanSync（规则：跳过隐藏项与 assets、只收 md、超阈值截断），
+  // 这里只负责把结果装进历史沿用的 acc 结构，避免改动所有调用点。
   function walk(dir, rel, acc) {
     if (acc.dirs.length > MAX_DIRS || acc.files.length > MAX_FILES) { acc.truncated = true; return }
-    let ents = []
-    try { ents = fs.readdirSync(dir, { withFileTypes: true }) } catch (e) { return }
-    for (const e of ents) {
-      if (e.name.startsWith('.')) continue // 隐藏目录/文件（.git .obsidian .attachments 等）
-      if (e.name === 'assets') continue // 图片附件目录，图片通过 assets/xxx.png 直接引用，不进笔记树
-      const r = rel ? rel + '/' + e.name : e.name
-      const full = path.join(dir, e.name)
-      if (e.isDirectory()) {
-        acc.dirs.push(r)
-        walk(full, r, acc)
-      } else if (MD_EXT.test(e.name)) {
-        acc.files.push({ rel: r, full })
-      }
+    const r = core.scanSync(dir)
+    for (const d of r.dirs) acc.dirs.push(rel ? rel + '/' + d : d)
+    for (const f of r.files) {
+      acc.files.push({ rel: rel ? rel + '/' + f.rel : f.rel, full: f.full })
     }
+    if (r.truncated) acc.truncated = true
   }
 
   let CACHE = null
@@ -482,8 +479,7 @@ module.exports = function installNDB(win, externalCfg) {
   const TTL = 800 // ms，避免每次交互全盘重扫
 
   function dirOf(rel) {
-    const d = path.dirname(rel)
-    return d === '.' ? '' : d.replace(/\\/g, '/')
+    return core.dirOf(String(rel))
   }
 
   function buildTree(dirList) {
@@ -704,24 +700,10 @@ module.exports = function installNDB(win, externalCfg) {
   // 排序的改动没人会去读 diff，所以这里优先"少转换、少出错"，不追求可读性。
   const ORDERTXT = path.join(REPO_META, 'order.txt')
   function readTreeOrder () {
-    const out = {}
     try {
       const raw = fs.readFileSync(ORDERTXT, 'utf8')
-      let cur = ''
-      raw.split(/\r?\n/).forEach(function (line) {
-        const t = line.trim()
-        if (!t) return
-        if (t.charAt(0) === '#') {
-          const name = t.slice(1).trim()
-          cur = (name === '根目录' || name === '根' || name === '') ? '' : name.replace(/\/+$/, '')
-          if (!out[cur]) out[cur] = []
-          return
-        }
-        if (!out[cur]) out[cur] = []
-        out[cur].push(t)
-      })
+      return core.parseOrder(raw)   // 解析规则在 core（根目录置顶、# 分段），与其它端一致
     } catch (e) { return {} }
-    return out
   }
 
   function writeTreeOrder (o) {
@@ -829,14 +811,8 @@ module.exports = function installNDB(win, externalCfg) {
   }
 
   function sortKids (kids, seq) {
-    if (!seq || !seq.length || !kids.length) return kids
-    const idx = new Map()
-    seq.forEach((id, i) => idx.set(id, i))
-    return kids.slice().sort((a, b) => {
-      const ia = idx.has(a.id) ? idx.get(a.id) : 1e9
-      const ib = idx.has(b.id) ? idx.get(b.id) : 1e9
-      return ia === ib ? 0 : ia - ib
-    })
+    // 排序算法下沉到 core（与其它端同一份），签名/语义保持一致
+    return core.sortKids(kids, seq)
   }
   function saveTreeOrder (tree) {
     // key 与元素 id 统一用「相对仓库根的完整路径」（目录 T1/T3、笔记 note/a/b.md），
