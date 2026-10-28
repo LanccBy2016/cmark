@@ -1,4 +1,4 @@
-import type { NodeId, TreeOrder } from '../domain/types.js'
+import type { NodeId, TreeOrder } from '../domain/types'
 
 /**
  * `.cmark/order.txt` 的读写（对应 ndb.js readTreeOrder / writeTreeOrder）。

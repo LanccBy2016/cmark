@@ -1,4 +1,4 @@
-import type { RelPath } from '../domain/types.js'
+import type { RelPath } from '../domain/types'
 
 export interface CommitInfo {
   sha: string

@@ -1,5 +1,5 @@
-import type { FileSystemPort } from '../ports/fs.js'
-import type { FsEntryInfo } from '../domain/types.js'
+import type { FileSystemPort } from '../ports/fs'
+import type { FsEntryInfo } from '../domain/types'
 
 /**
  * 内存文件系统：单测与「各端一致性回归」的基准实现。

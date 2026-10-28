@@ -1,6 +1,5 @@
-import type { NoteRef, NodeId, RelPath, TreeNode, TreeOrder } from '../domain/types.js'
+import type { NoteRef, NodeId, RelPath, TreeNode, TreeOrder } from '../domain/types'
 
-/** 目录 rel 的父目录（根目录返回 ''），与 ndb.js dirOf 同义 */
 export function dirOf(rel: RelPath): RelPath {
   const i = rel.lastIndexOf('/')
   return i < 0 ? '' : rel.slice(0, i)
@@ -14,15 +13,12 @@ export function baseName(rel: RelPath): string {
 export const noteId = (rel: RelPath): NodeId => `note/${rel}`
 export const dirId = (rel: RelPath): NodeId => rel
 
-/**
- * 按用户拖动顺序排序（对应 ndb.js sortKids）。
- * 未出现在顺序表里的元素保持原位排到末尾——这样新增文件默认在最后，不会打乱已有顺序。
- */
-export function sortKids(kids: TreeNode[], seq?: NodeId[]): TreeNode[] {
+/** 按用户拖动顺序排序；未登记的排末尾并保持相对次序 */
+export function sortKids<T extends { id: NodeId }>(kids: T[], seq?: NodeId[]): T[] {
   if (!seq || seq.length === 0 || kids.length === 0) return kids
   const idx = new Map<NodeId, number>()
   seq.forEach((id, i) => idx.set(id, i))
-  const at = (k: TreeNode) => (idx.has(k.id) ? (idx.get(k.id) as number) : 1e9)
+  const at = (k: T) => (idx.has(k.id) ? (idx.get(k.id) as number) : 1e9)
   return kids.slice().sort((a, b) => at(a) - at(b))
 }
 
@@ -32,11 +28,18 @@ export interface BuildTreeInput {
   order?: TreeOrder
 }
 
+export interface TreeIndex {
+  /** 根目录的子节点 */
+  root: TreeNode[]
+  /** 每个目录的子节点视图（key 为目录相对路径，根为 ''） */
+  byDir: Map<RelPath, TreeNode[]>
+}
+
 /**
- * 构建树（对应 ndb.js buildTree）：目录自包含子节点，节点 id 沿用 note/<rel> 与 <dirRel>。
- * 纯函数，不碰磁盘——同一份扫描结果 + 同一份 order.txt 永远得到同样的树。
+ * 一次构建全树，同时给出「每个目录的子节点」视图。
+ * folder doc 需要的是 byDir.get(dir)，根节点是 root —— 避免各端自己再递归一遍。
  */
-export function buildTree(input: BuildTreeInput): TreeNode[] {
+export function buildTreeIndex(input: BuildTreeInput): TreeIndex {
   const { dirs, notes, order = {} } = input
 
   const notesByDir = new Map<RelPath, NoteRef[]>()
@@ -55,21 +58,31 @@ export function buildTree(input: BuildTreeInput): TreeNode[] {
     dirsByParent.set(p, arr)
   }
 
-  const inline = (dirRel: RelPath): TreeNode[] => {
+  const byDir = new Map<RelPath, TreeNode[]>()
+  const build = (dirRel: RelPath): TreeNode[] => {
+    const cached = byDir.get(dirRel)
+    if (cached) return cached
     const kids: TreeNode[] = []
     for (const n of notesByDir.get(dirRel) ?? []) {
       kids.push({ id: noteId(n.rel), name: n.title, kind: 'note' })
     }
     for (const sub of dirsByParent.get(dirRel) ?? []) {
-      kids.push({ id: dirId(sub), name: baseName(sub), kind: 'dir', children: inline(sub) })
+      kids.push({ id: dirId(sub), name: baseName(sub), kind: 'dir', children: build(sub) })
     }
-    return sortKids(kids, order[dirRel])
+    const sorted = sortKids(kids, order[dirRel])
+    byDir.set(dirRel, sorted)
+    return sorted
   }
 
-  return inline('')
+  const root = build('')
+  return { root, byDir }
 }
 
-/** 便于 UI 按 id 查找（视图层用，不参与核心逻辑） */
+/** 构建树（只要根节点时用这个） */
+export function buildTree(input: BuildTreeInput): TreeNode[] {
+  return buildTreeIndex(input).root
+}
+
 export function flattenTree(tree: TreeNode[], out = new Map<NodeId, TreeNode>()): Map<NodeId, TreeNode> {
   for (const n of tree) {
     out.set(n.id, n)

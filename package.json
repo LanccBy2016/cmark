@@ -16,7 +16,8 @@
     "typecheck:core": "tsc -p packages/core/tsconfig.json --noEmit",
     "pack": "node scripts/pack.mjs",
     "pack:npm": "node scripts/prepare-npm.mjs",
-    "pack:upx": "node scripts/pack-upx.mjs"
+    "pack:upx": "node scripts/pack-upx.mjs",
+    "build:core": "node scripts/build-core.mjs"
   },
   "dependencies": {
     "@platejs/basic-nodes": "^53.0.0",

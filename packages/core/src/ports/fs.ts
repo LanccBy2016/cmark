@@ -1,4 +1,4 @@
-import type { FsEntryInfo } from '../domain/types.js'
+import type { FsEntryInfo } from '../domain/types'
 
 /**
  * 文件系统端口：所有平台适配器唯一需要实现的 IO 面。
