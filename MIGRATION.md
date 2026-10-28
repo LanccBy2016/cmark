@@ -48,7 +48,7 @@ apps/mobile          Capacitor（阶段 4）
 | 1 | 插件端把 `ndb.js` 的数据层切到 `core/useCases/*` + `adapters/node` | ZTools 线上行为一致（树/排序/重命名回归） |
 | 2 | 三个手搓 DOM 面板重写成 React | 插件端 UI 与现在等价 |
 | 3 | `apps/desktop` 出 exe（git 先用系统 git，后续切 git2） | Windows 真机跑通「打开工作区 / 编辑 / 提交推送 / 导出」 |
-| 4 | `apps/mobile`（Capacitor），先 Android 后 iOS | Android 跑通「沙盒目录 + 编辑 + 同步」 |
+| 4 | `apps/mobile`（**Tauri v2 mobile**，与桌面共用同一套 Rust 命令），先 Android 后 iOS | Android 跑通「沙盒/SF 目录 + 编辑 + 同步」 |
 
 ## 4. 岗位选型（已定）
 

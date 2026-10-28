@@ -6,13 +6,13 @@
 
 ```
 ┌────────────────────────────── apps（壳，每个端一个目录）──────────────────────────────┐
-│ plugin-ztools   plugin-utools   desktop(Win/Mac)   mobile(Android/iOS)   harmony(预留) │
+│ plugin-ztools   plugin-utools   desktop(Win/Mac)   mobile(Android/iOS，同为 Tauri) │
 └───────────────┬──────────────────────┬──────────────────────┬──────────────────────────┘
                 │                      │                      │
-        adapters/node            adapters/tauri        adapters/capacitor   adapters/arkts
-        (node:fs · git)     (invoke → Rust commands)   (Filesystem/Share…)   (ArkWeb 桥，未实现)
+        adapters/node                 adapters/tauri（桌面 + 移动共用同一套 invoke）
+        (node:fs · git)               (invoke → Rust commands；移动端多两个 toolchain)
                 │                      │                      │
-                └──────────────┬───────┴──────────────────────┘
+                └──────────────┬───────────────────────────────┘
                                ▼
         packages/core   领域模型 + useCases + ports（纯 TS，零宿主 API）
         packages/ui     React 组件 + Plate/Slate 编辑器（唯一 UI 实现）
@@ -32,8 +32,8 @@
 | 状态 | **zustand** | 现有 | ✅ |
 | Markdown | **marked + remark-gfm/math + katex + mermaid + highlight.js** | 现有，跨端一致 | ✅ |
 | 桌面 | **Tauri v2**（Windows 优先，macOS 同码） | 体积与原生能力的最优解；Windows 需 WebView2 | 🟡 骨架 |
-| 移动 | **Capacitor**（Android 先，iOS 等账号） | 系统集成插件现成；核心是 TS，Tauri 移动端优势用不上 | ⬜ |
-| 鸿蒙 | **ArkTS 壳 + ArkWeb**（`capacitor-openharmony` 可复用思路） | 官方 Tauri 不支持鸿蒙；ArkWeb 的 `registerJavaScriptProxy` 支持同步方法 | ⬜ 预留 |
+| 移动 | **Tauri v2 mobile**（Android 先，iOS 等 Mac + 账号） | ★ 与桌面同一个 Rust 壳、同一份命令，**不再引入 Capacitor** | ⬜ |
+| 鸿蒙 | **暂不支持，不做** | Tauri 官方无鸿蒙；无设备无需求，等真有人用再单独评估 ArkTS 壳 | ⛔ 砍掉 |
 | 插件宿主 | **ZTools / uTools 双壳**（不合并） | plugin.json、feature code、注入时机、审核材料都不同 | ✅ 现有 |
 | Git | **契约单引擎：isomorphic-git 为默认**；桌面/插件可切 `system` | 移动端与鸿蒙不可能调系统 git；单引擎才能行为一致 | 🟡 契约已定，实现待迁 |
 | 存储 | **纯文件**：`.md` + `~/.cmark-config.json` + `.cmark/order.txt` | 无数据库，用户可随时带走；与插件版互通 | ✅ 兼容 |
@@ -50,9 +50,9 @@
 | uTools | 同结构单独壳 | `.upx` | feature code 不同 |
 | Windows | `cd apps/desktop && npx tauri build` | NSIS `setup.exe` / `.msi` | 需 MSVC + WebView2 |
 | macOS | CI `desktop-v*` tag | `.dmg` / `.app` | 未签名可运行（首次右键打开） |
-| Android | `cd apps/mobile && npx cap sync android` | `.apk` / `.aab` | 沙盒目录 + 可选 SAF |
-| iOS | 同 Android | `.ipa` | **需 Apple 开发者账号**，否则不投入 |
-| HarmonyOS | DevEco Studio | `.hap` | 需真机/云真机验收 IME 与文件选择 |
+| Android | `cd apps/mobile && npx tauri android build` | `.apk` / `.aab` | 需 Android SDK/NDK；用户选目录靠 `tauri-plugin-android-fs` |
+| iOS | `npx tauri ios build` | `.ipa` | **需 Mac + Xcode + Apple 账号**，三者缺一不可 |
+| HarmonyOS | — | — | 已砍（Tauri 无鸿蒙支持） |
 
 ## 4. 明确不用
 
@@ -61,6 +61,7 @@
 | MAUI 原生 UI | 编辑器要重写，3–6 个月，收益为零 |
 | MAUI + WebView | 每端自己焊原生桥，macOS 是 Catalyst，不支持 Linux |
 | uni-app / HBuilderX 一条链 | 出不了 Windows/macOS；5+ 运行时无 Node、无 git，撑不起核心能力 |
+| **Capacitor（移动）** | 已从方案中移除：移动端改用 Tauri mobile，**少一套框架**（Capacitor 自带一套插件生态与版本节奏） |
 | Tauri 官方鸿蒙 | 官方未支持（issue #11112 仍开着），时间不可控 |
 | Electron 桌面 | 体积 ~150MB；仅当「只维护一套壳」优先级高于桌面体验时才考虑 |
 
