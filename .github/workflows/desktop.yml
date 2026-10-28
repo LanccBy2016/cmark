@@ -1,0 +1,70 @@
+name: desktop
+
+# 没有 Mac 也能出 macOS 安装包：GitHub 的 macos runner 是唯一路径
+# （Tauri 不能从 Windows/Linux 交叉编译到 macOS）。
+on:
+  workflow_dispatch:
+  push:
+    tags: ['desktop-v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: win-x64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            label: mac-arm64
+          - os: macos-14
+            target: x86_64-apple-darwin
+            label: mac-x64
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: apps/desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Install tauri CLI
+        run: npm install
+
+      # 前端产物（app/）随仓库入库，这里不重复构建；
+      # 若要发版前重新构建，打开下面这一步并保证根目录 `npm ci && npm run build` 通过。
+      # - name: Build frontend
+      #   working-directory: .
+      #   run: npm ci && npm run build
+
+      - name: Tauri build
+        run: npx tauri build --target ${{ matrix.target }}
+        env:
+          # 未配置签名证书时不签名：产物可直接运行（首次需用户在系统里允许）
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmark-${{ matrix.label }}
+          if-no-files-found: warn
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app
