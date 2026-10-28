@@ -31,6 +31,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var bundle_exports = {};
 __export(bundle_exports, {
   IGNORED_DIR_NAMES: () => IGNORED_DIR_NAMES,
+  IMG_MD: () => IMG_MD,
   MAX_DIRS: () => MAX_DIRS,
   MAX_FILES: () => MAX_FILES,
   MemoryFs: () => MemoryFs,
@@ -45,12 +46,16 @@ __export(bundle_exports, {
   flattenTree: () => flattenTree,
   isNoteFile: () => isNoteFile,
   isTruncated: () => isTruncated,
+  joinRelPath: () => joinRelPath,
   nodeConfig: () => nodeConfig,
   nodeFs: () => nodeFs,
   nodeGit: () => nodeGit,
+  normalizeRelPath: () => normalizeRelPath,
   noteId: () => noteId,
   noteTitleFromName: () => noteTitleFromName,
   parseOrder: () => parseOrder,
+  relativeRelPath: () => relativeRelPath,
+  retargetMarkdownImageRefs: () => retargetMarkdownImageRefs,
   scanSync: () => scanSync,
   scanWorkspace: () => scanWorkspace,
   serializeOrder: () => serializeOrder,
@@ -132,8 +137,9 @@ function sortKids(kids, seq) {
   const at = (k) => idx.has(k.id) ? idx.get(k.id) : 1e9;
   return kids.slice().sort((a, b) => at(a) - at(b));
 }
-function buildTreeIndex(input) {
+function buildTreeIndex(input, options = {}) {
   const { dirs, notes, order = {} } = input;
+  const dirIdStyle = options.dirIdStyle ?? "rel";
   const notesByDir = /* @__PURE__ */ new Map();
   for (const n of notes) {
     const d = dirOf(n.rel);
@@ -157,7 +163,12 @@ function buildTreeIndex(input) {
       kids.push({ id: noteId(n.rel), name: n.title, kind: "note" });
     }
     for (const sub of dirsByParent.get(dirRel) ?? []) {
-      kids.push({ id: dirId(sub), name: baseName(sub), kind: "dir", children: build(sub) });
+      kids.push({
+        id: dirIdStyle === "basename" ? baseName(sub) : dirId(sub),
+        name: baseName(sub),
+        kind: "dir",
+        children: build(sub)
+      });
     }
     const sorted = sortKids(kids, order[dirRel]);
     byDir.set(dirRel, sorted);
@@ -166,8 +177,8 @@ function buildTreeIndex(input) {
   const root = build("");
   return { root, byDir };
 }
-function buildTree(input) {
-  return buildTreeIndex(input).root;
+function buildTree(input, options = {}) {
+  return buildTreeIndex(input, options).root;
 }
 function flattenTree(tree, out = /* @__PURE__ */ new Map()) {
   for (const n of tree) {
@@ -277,6 +288,55 @@ var MemoryFs = class {
 };
 function normalize(p) {
   return p.replace(/\/+/g, "/").replace(/\/+$/, "");
+}
+
+// packages/core/src/useCases/rewriteRefs.ts
+var IMG_MD = /(!\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g;
+var CODE_SEG = /(```[\s\S]*?```|~~~[\s\S]*?~~~|\$\$[\s\S]*?\$\$|`+[^`]*`+)/g;
+var EXTERNAL = /^(https?:|data:|file:|attachment:|#|mailto:)/i;
+function normalizeRelPath(p) {
+  const out = [];
+  for (const seg of String(p).split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") {
+      if (out.length === 0) return "..";
+      out.pop();
+      continue;
+    }
+    out.push(seg);
+  }
+  return out.join("/");
+}
+function joinRelPath(dirRel, rel) {
+  if (!rel) return normalizeRelPath(dirRel);
+  if (rel.startsWith("/")) return normalizeRelPath(rel);
+  return normalizeRelPath(`${dirRel}/${rel}`);
+}
+function relativeRelPath(fromDirRel, toRel) {
+  const from = fromDirRel ? fromDirRel.split("/").filter(Boolean) : [];
+  const to = toRel ? toRel.split("/").filter(Boolean) : [];
+  let i = 0;
+  while (i < from.length && i < to.length && from[i] === to[i]) i++;
+  const up = from.slice(i).map(() => "..");
+  const rest = to.slice(i);
+  if (up.length === 0 && rest.length === 0) return "";
+  return [...up, ...rest].join("/");
+}
+function rewriteSegment(seg, opts) {
+  return seg.replace(IMG_MD, (whole, pre, url, post) => {
+    if (EXTERNAL.test(url)) return whole;
+    const absRel = joinRelPath(opts.oldDirRel, url);
+    if (absRel.startsWith("..")) return whole;
+    if (opts.exists && !opts.exists(absRel)) return whole;
+    let rel = relativeRelPath(opts.newDirRel, absRel);
+    if (rel && !rel.startsWith(".")) rel = `./${rel}`;
+    return pre + rel + post;
+  });
+}
+function retargetMarkdownImageRefs(text, opts) {
+  if (!text || opts.oldDirRel === opts.newDirRel) return text;
+  const segs = String(text).split(CODE_SEG);
+  return segs.map((seg, i) => i % 2 === 1 ? seg : rewriteSegment(seg, opts)).join("");
 }
 
 // adapters/node/src/scanSync.ts
@@ -465,6 +525,7 @@ function nodeConfig() {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   IGNORED_DIR_NAMES,
+  IMG_MD,
   MAX_DIRS,
   MAX_FILES,
   MemoryFs,
@@ -479,12 +540,16 @@ function nodeConfig() {
   flattenTree,
   isNoteFile,
   isTruncated,
+  joinRelPath,
   nodeConfig,
   nodeFs,
   nodeGit,
+  normalizeRelPath,
   noteId,
   noteTitleFromName,
   parseOrder,
+  relativeRelPath,
+  retargetMarkdownImageRefs,
   scanSync,
   scanWorkspace,
   serializeOrder,

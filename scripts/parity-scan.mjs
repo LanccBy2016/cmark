@@ -128,6 +128,105 @@ if (JSON.stringify(oldParseOrder(orderText)) !== JSON.stringify(core.parseOrder(
   fails.push('parseOrder 结果不一致')
 }
 
+// ---------------- 建树等价性：旧 inline vs core.buildTreeIndex(basename) ----------------
+// 旧实现：把 ndb.js 的 buildTree/inline 照抄（notes 只取 rel，id 用裸名）
+function oldBuildTree(dirsList, notesByDir, order) {
+  const byParent = new Map()
+  for (const d of dirsList) {
+    const p = dirOfOld(d) === '' ? '__root__' : dirOfOld(d)
+    if (!byParent.has(p)) byParent.set(p, [])
+    byParent.get(p).push(d)
+  }
+  const inline = (d) => {
+    const kids = []
+    for (const rel of (notesByDir.get(d) || [])) kids.push({ id: 'note/' + rel })
+    for (const sub of (byParent.get(d) || [])) {
+      kids.push({ id: sub.split('/').pop(), name: sub.split('/').pop(), children: inline(sub) })
+    }
+    return oldSortKids(kids, order[d])
+  }
+  return inline
+}
+function dirOfOld(rel) {
+  const i = rel.lastIndexOf('/')
+  return i < 0 ? '' : rel.slice(0, i)
+}
+
+const notesByDir = new Map()
+for (const f of neu.files) {
+  const d = dirOfOld(f.rel)
+  if (!notesByDir.has(d)) notesByDir.set(d, [])
+  notesByDir.get(d).push(f.rel)
+}
+const orderMap = core.parseOrder('# 根目录\n批量\nREADME.md\n\n# 批量\n批量/1\n批量/0\n')
+const oldInline = oldBuildTree(neu.dirs, notesByDir, orderMap)
+const newIndex = core.buildTreeIndex(
+  { dirs: neu.dirs, notes: neu.files.map((f) => ({ rel: f.rel, title: f.title })), order: orderMap },
+  { dirIdStyle: 'basename' },
+)
+const idsOf = (nodes) => nodes.map((n) => n.id)
+const dirsToCheck = ['', ...neu.dirs]
+for (const d of dirsToCheck) {
+  const a = idsOf(oldInline(d))
+  // 旧 inline('') 只返回「根目录下的散落笔记」（顶层目录由 ndb 的 rootChildren 另行拼装），
+  // core 的 byDir('') 语义更完整（含顶层目录）——比较时按旧语义过滤，其余目录逐项对齐。
+  const bNodes = newIndex.byDir.get(d) || []
+  const b = d === '' ? bNodes.filter((n) => n.kind === 'note').map((n) => n.id) : idsOf(bNodes)
+  if (JSON.stringify(a) !== JSON.stringify(b)) {
+    fails.push(`树不一致 @${d || '<root>'}: 旧=${JSON.stringify(a)} 新=${JSON.stringify(b)}`)
+    break
+  }
+}
+
+// ---------------- 图片路径重写等价性 ----------------
+const IMG_MD = /(!\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g
+function oldRewrite(txt, oldDirAbs, newDirAbs, repoRoot) {
+  if (!txt || oldDirAbs === newDirAbs) return txt
+  const segs = String(txt).split(/(```[\s\S]*?```|~~~[\s\S]*?~~~|\$\$[\s\S]*?\$\$|`+[^`]*`+)/g)
+  return segs.map((seg, idx) => (idx % 2 === 1 ? seg : seg.replace(IMG_MD, (whole, pre, url, post) => {
+    if (/^(https?:|data:|file:|attachment:|#|mailto:)/i.test(url)) return whole
+    let abs
+    try { abs = path.resolve(oldDirAbs, url) } catch (e) { return whole }
+    if (abs !== repoRoot && !abs.startsWith(repoRoot + path.sep)) return whole
+    try { if (!fs.existsSync(abs)) return whole } catch (e) { return whole }
+    let rel = path.relative(newDirAbs, abs).split(path.sep).join('/')
+    if (rel && !rel.startsWith('.')) rel = './' + rel
+    return pre + rel + post
+  }))).join('')
+}
+
+const rewriteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cmark-parity-rw-'))
+const touch = (rel) => { const full = path.join(rewriteRoot, rel); fs.mkdirSync(path.dirname(full), { recursive: true }); fs.writeFileSync(full, 'x') }
+touch('assets/a.png')
+touch('A/pic.png')
+touch('A/B/pic.png')
+const samples = [
+  '![a](./pic.png)',
+  '![a](../pic.png)',
+  '![a](../../assets/a.png)',
+  '![a](https://x/y.png)',
+  '`![a](./pic.png)`',
+  '```\n![a](./pic.png)\n```',
+  '![a](../../outside.png)',
+]
+const pairs = [
+  ['', 'A'], ['A', ''], ['A', 'A/B'], ['A/B', 'A'], ['A/B', 'A/B/C'], ['', ''], ['A', 'A'],
+]
+for (const [o, n] of pairs) {
+  for (const text of samples) {
+    const oldOut = oldRewrite(text, path.join(rewriteRoot, o), path.join(rewriteRoot, n), rewriteRoot)
+    const newOut = core.retargetMarkdownImageRefs(text, {
+      oldDirRel: o,
+      newDirRel: n,
+      exists: (rel) => { try { return fs.existsSync(path.join(rewriteRoot, rel)) } catch (e) { return false } },
+    })
+    if (oldOut !== newOut) {
+      fails.push(`图片重写不一致 oldDir=${o || '<root>'} newDir=${n} text=${text}\n  旧=${oldOut}\n  新=${newOut}`)
+    }
+  }
+}
+fs.rmSync(rewriteRoot, { recursive: true, force: true })
+
 fs.rmSync(root, { recursive: true, force: true })
 
 if (fails.length) {

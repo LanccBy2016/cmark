@@ -80,29 +80,19 @@ module.exports = function installNDB(win, externalCfg) {
 
   const IMG_MD = /(!\[[^\]]*\]\()([^)\s]+)((?:\s+"[^"]*")?\))/g
 
-  /** 纯字符串版：把 txt 里所有图片相对路径按「旧目录 → 新目录」重算 */
+  /**
+   * 把 txt 里所有图片相对路径按「旧目录 → 新目录」重算。
+   * 实现下沉到 core（posix 语义的相对路径运算），这里只提供「仓库内相对路径是否存在」的回调。
+   */
   function rewriteRelInText(txt, oldDir, newDir) {
     if (!txt || oldDir === newDir) return txt
-    // 代码块/行内代码里的只是示例，跳过
-    const segs = String(txt).split(
-      /(```[\s\S]*?```|~~~[\s\S]*?~~~|\$\$[\s\S]*?\$\$|`+[^`]*`+)/g,
-    )
-    return segs
-      .map((seg, idx) => (idx % 2 === 1 ? seg : rewriteSeg(seg, oldDir, newDir)))
-      .join('')
-  }
-
-  function rewriteSeg(seg, oldDir, newDir) {
-    return String(seg).replace(IMG_MD, (whole, pre, url, post) => {
-      if (/^(https?:|data:|file:|attachment:|#|mailto:)/i.test(url)) return whole
-      let abs
-      try { abs = path.resolve(oldDir, url) } catch (e) { return whole }
-      // 只动仓库范围内的、确实存在的文件，避免误改外链和失效引用
-      if (abs !== REPO_ROOT && !abs.startsWith(REPO_ROOT + path.sep)) return whole
-      try { if (!fs.existsSync(abs)) return whole } catch (e) { return whole }
-      let rel = path.relative(newDir, abs).split(path.sep).join('/')
-      if (rel && !rel.startsWith('.')) rel = './' + rel
-      return pre + rel + post
+    const toRel = (abs) => path.relative(REPO_ROOT, abs).split(path.sep).join('/')
+    return core.retargetMarkdownImageRefs(txt, {
+      oldDirRel: toRel(oldDir),
+      newDirRel: toRel(newDir),
+      exists: (rel) => {
+        try { return fs.existsSync(path.join(REPO_ROOT, rel)) } catch (e) { return false }
+      },
     })
   }
 
@@ -483,28 +473,27 @@ module.exports = function installNDB(win, externalCfg) {
   }
 
   function buildTree(dirList) {
-    // 生成 {dir: children[]}，children 里子目录内联（自包含，UI 好渲染）
-    const byParent = new Map()
+    // 建树与排序统一交给 core（规则/顺序算法与 Tauri、移动端同一份）。
+    // id 形态固定用 basename：folder doc 的 children 里目录 id 是裸名，bundle 的 _R()
+    // 会拿 folder id 去 children 里认重复项，两边格式不同会导致节点重复挂载。
+    const notesForTree = []
+    for (const rel of (NOTES_BY_DIR.get('') || [])) notesForTree.push({ rel, title: stripExt(rel) })
     for (const d of dirList) {
-      const p = dirOf(d) === '' ? '__root__' : dirOf(d)
-      if (!byParent.has(p)) byParent.set(p, [])
-      byParent.get(p).push(d)
+      for (const rel of (NOTES_BY_DIR.get(d) || [])) notesForTree.push({ rel, title: stripExt(rel) })
     }
-    const inline = (d) => {
-      const kids = []
-      const notesOf = NOTES_BY_DIR.get(d) || []
-      for (const rel of notesOf) {
-        const nd = NOTES_DOCS.get('note/' + rel)
-        kids.push(nd ? { id: 'note/' + rel, data: { id: 'note/' + rel, title: nd.title, plain: nd.plain } } : { id: 'note/' + rel })
+    const index = core.buildTreeIndex(
+      { dirs: dirList, notes: notesForTree, order: TREE_ORDER },
+      { dirIdStyle: 'basename' },
+    )
+    const toNdb = (nodes) => nodes.map((n) => {
+      if (n.kind === 'note') {
+        const nd = NOTES_DOCS.get(n.id)
+        return nd ? { id: n.id, data: { id: n.id, title: nd.title, plain: nd.plain } } : { id: n.id }
       }
-      for (const sub of (byParent.get(d) || [])) {
-            // id 用裸名（T3），必须和 folder doc 的 id 一致：bundle 的 _R() 会拿 folder id
-            // 去 children 里认重复项，两边格式不同就会既保留又重挂，反复展开折叠后节点重叠。
-            kids.push({ id: sub.split('/').pop(), name: sub.split('/').pop(), children: inline(sub) })
-          }
-      return sortKids(kids, TREE_ORDER[d])
-    }
-    return inline
+      return { id: n.id, name: n.name, children: toNdb(n.children || []) }
+    })
+    const none = []
+    return (d) => toNdb(index.byDir.get(d) || none)
   }
 
   let NOTES_BY_DIR = new Map()

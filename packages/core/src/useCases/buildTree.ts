@@ -28,6 +28,15 @@ export interface BuildTreeInput {
   order?: TreeOrder
 }
 
+export interface BuildTreeOptions {
+  /**
+   * 目录节点 id 的形态：
+   *  - 'rel'（默认）：完整相对路径，如 `T1/T2`（Tauri/移动端用）
+   *  - 'basename'：裸名，如 `T2`（ZTools 插件历史约定，bundle 靠它去重/重挂，不能擅自改）
+   */
+  dirIdStyle?: 'rel' | 'basename'
+}
+
 export interface TreeIndex {
   /** 根目录的子节点 */
   root: TreeNode[]
@@ -39,8 +48,9 @@ export interface TreeIndex {
  * 一次构建全树，同时给出「每个目录的子节点」视图。
  * folder doc 需要的是 byDir.get(dir)，根节点是 root —— 避免各端自己再递归一遍。
  */
-export function buildTreeIndex(input: BuildTreeInput): TreeIndex {
+export function buildTreeIndex(input: BuildTreeInput, options: BuildTreeOptions = {}): TreeIndex {
   const { dirs, notes, order = {} } = input
+  const dirIdStyle = options.dirIdStyle ?? 'rel'
 
   const notesByDir = new Map<RelPath, NoteRef[]>()
   for (const n of notes) {
@@ -67,7 +77,12 @@ export function buildTreeIndex(input: BuildTreeInput): TreeIndex {
       kids.push({ id: noteId(n.rel), name: n.title, kind: 'note' })
     }
     for (const sub of dirsByParent.get(dirRel) ?? []) {
-      kids.push({ id: dirId(sub), name: baseName(sub), kind: 'dir', children: build(sub) })
+      kids.push({
+        id: dirIdStyle === 'basename' ? baseName(sub) : dirId(sub),
+        name: baseName(sub),
+        kind: 'dir',
+        children: build(sub),
+      })
     }
     const sorted = sortKids(kids, order[dirRel])
     byDir.set(dirRel, sorted)
@@ -79,8 +94,8 @@ export function buildTreeIndex(input: BuildTreeInput): TreeIndex {
 }
 
 /** 构建树（只要根节点时用这个） */
-export function buildTree(input: BuildTreeInput): TreeNode[] {
-  return buildTreeIndex(input).root
+export function buildTree(input: BuildTreeInput, options: BuildTreeOptions = {}): TreeNode[] {
+  return buildTreeIndex(input, options).root
 }
 
 export function flattenTree(tree: TreeNode[], out = new Map<NodeId, TreeNode>()): Map<NodeId, TreeNode> {
