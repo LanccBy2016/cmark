@@ -4,9 +4,9 @@ dist/
 *.asar
 .DS_Store
 
-# Tauri 桌面壳（apps/desktop）：本地保留、暂不入库。
-# 未成熟且 target/ 有数 GB 编译产物，恢复开发时再解开本行。
-apps/
+# Tauri 桌面壳（根目录下的 apps/desktop）：本地保留、暂不入库。
+# 注意必须写 /apps/ 锚定仓库根，写成 apps/ 会连 src/apps/ 一起忽略（ZTools 入口就在那里）。
+/apps/
 
 # 构建产物与本地文件
 tmp/
