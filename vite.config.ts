@@ -1,6 +1,23 @@
+import fs from 'node:fs'
+import path from 'node:path'
 import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// Windows 上 esbuild 偶发删不掉自己的临时文件：
+//   [vite:esbuild-transpile] remove C:\Users\...\Temp\esbuild-xxxx: Access is denied
+// 不是代码问题，是 %TEMP% 被占用 / 被杀软锁。把 TMP 指到项目内目录即稳定。
+// 必须在 esbuild 子进程启动前设置，所以放在 config 顶层求值处。
+if (process.platform === 'win32') {
+  const tmp = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.tmp')
+  try {
+    fs.mkdirSync(tmp, { recursive: true })
+    process.env.TMP = tmp
+    process.env.TEMP = tmp
+  } catch (e) {
+    // 建不出来就沿用系统 TEMP，最坏情况是偶发构建失败
+  }
+}
 
 export default defineConfig({
   plugins: [react()],

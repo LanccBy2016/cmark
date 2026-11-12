@@ -38,7 +38,7 @@ fs.mkdirSync(ws, { recursive: true })
 const cfgPath = path.join(tmp, 'cfg.json')
 fs.writeFileSync(cfgPath, JSON.stringify({ workspace: ws, initialized: true }), 'utf8')
 
-const installNDB = require(path.resolve('preload/ndb.js'))
+const installNDB = require(path.resolve('preload/ports/ndb.js'))
 const { inflateDoc, deflateDoc } = require(path.resolve('scripts/_inline.cjs'))
 
 const win = {}

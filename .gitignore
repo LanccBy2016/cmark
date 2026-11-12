@@ -4,8 +4,13 @@ dist/
 *.asar
 .DS_Store
 
+# Tauri 桌面壳（apps/desktop）：本地保留、暂不入库。
+# 未成熟且 target/ 有数 GB 编译产物，恢复开发时再解开本行。
+apps/
+
 # 构建产物与本地文件
 tmp/
+.tmp/
 
 # 内部文档与临时脚本，不入库
 SPEC.md

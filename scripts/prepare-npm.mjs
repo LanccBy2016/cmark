@@ -22,7 +22,10 @@ const appDir = path.join(root, 'app')
 
 // npm 包名：ZTools 里「从 npm 安装」就填这个名字
 // 裸名 cmark 已被 node-cmark 占用，只能用 scope
-const PUBLISH_NAME = process.env.NPM_PACKAGE_NAME || '@lancc/cmark'
+// 注意变量名不能用 NPM_PACKAGE_NAME：`npm run pack:npm` 会注入 npm_package_name，
+// 而 Windows 的环境变量不区分大小写，会被误读成根 package.json 的 name（cmark），
+// 结果发布目录的 name 变成别人占用的裸名。改用专属变量名。
+const PUBLISH_NAME = process.env.CMARK_NPM_NAME || '@lancc/cmark'
 
 // 必须平铺在包根的文件/目录
 const REQUIRED = ['plugin.json', 'index.html', 'logo.png', 'preload.js', 'preload']
@@ -108,4 +111,5 @@ const { bytes, files } = sizeOf(outDir)
 console.log('[prepare-npm] 发布目录：' + outDir)
 console.log('[prepare-npm] 包名 ' + PUBLISH_NAME + ' 版本 ' + pkg.version)
 console.log('[prepare-npm] ' + files + ' 个文件，解包 ' + (bytes / 1048576).toFixed(1) + ' MB')
-console.log('[prepare-npm] 下一步：cd "' + outDir + '" && npm publish --provenance --access public')
+console.log('[prepare-npm] 下一步：cd "' + outDir + '" && npm publish --access public')
+console.log('[prepare-npm] 本地发布不要加 --provenance（那是 GitHub Actions OIDC 专用，本地会直接失败）')

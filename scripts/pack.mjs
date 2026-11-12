@@ -25,15 +25,17 @@ const pjApp = { ...pjRoot, main: 'index.html' }
 fs.writeFileSync(path.join(dist, 'plugin.json'), JSON.stringify(pjApp, null, 2) + '\n', 'utf8')
 const logoSvg = path.join(root, 'public', 'logo.png')
 if (fs.existsSync(logoSvg)) fs.copyFileSync(logoSvg, path.join(dist, 'logo.png'))
-// 2. preload 及其依赖
+// 2. preload 及其依赖（递归：ports/ 与 panels/ 是子目录）
 fs.copyFileSync(path.join(root, 'preload.js'), path.join(dist, 'preload.js'))
 const preloadDir = path.join(root, 'preload')
-fs.mkdirSync(path.join(dist, 'preload'), { recursive: true })
-for (const f of fs.readdirSync(preloadDir)) {
-  if (f.endsWith('.js') || f === 'package.json') {
-    fs.copyFileSync(path.join(preloadDir, f), path.join(dist, 'preload', f))
-  }
-}
+fs.cpSync(preloadDir, path.join(dist, 'preload'), {
+  recursive: true,
+  filter: (src) => {
+    const st = fs.statSync(src)
+    if (st.isDirectory()) return true
+    return src.endsWith('.js') || src.endsWith('.json')
+  },
+})
 
 // 关键：uTools 导入源码工程时，工程目录就是 app/，Electron 加载 preload.js 会向上找
 // 最近的 package.json。仓库根那份是 "type": "module"（vite 需要），会把 app/preload.js
