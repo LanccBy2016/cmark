@@ -1,6 +1,6 @@
 {
   "name": "cmark",
-  "version": "1.2.4",
+  "version": "1.2.5",
   "private": true,
   "type": "module",
   "description": "CMark —— 本地 Markdown 笔记，用 git 同步",

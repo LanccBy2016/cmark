@@ -181,7 +181,7 @@ function Row(props: {
           ) : (
             <button
               type="button"
-              title="在浏览器中打开"
+              title="用默认程序打开（.md 关联的程序）"
               onClick={(e) => {
                 e.stopPropagation()
                 props.onQuickOpenBrowser?.(node.rel)
@@ -697,19 +697,21 @@ export function Sidebar({
    * 在浏览器中打开：直接打开真实的笔记文件。
    * 用户的浏览器装了 Markdown 渲染插件，能直接渲染 .md；
    * 之前生成临时 HTML 的做法改变了路径来源，图片相对路径也全是断的。
+   *
+   * 宿主接口现在返回 Promise（preload 用 electron.shell.openPath 拿真实错误信息），
+   * 所以这里必须 await：否则 Promise 没有 ok 字段，成功也会被判成失败。
    */
   const quickOpenBrowser = (rel: string) => {
-    try {
-      const r = (
-        notes() as unknown as {
-          openNoteInBrowser?: (rel: string) => { ok: boolean; message?: string }
-        }
-      ).openNoteInBrowser?.(rel)
-      if (!r) setMessage('打开失败：宿主接口不可用')
-      else if (!r.ok) setMessage(r.message || '打开失败')
-    } catch (e) {
-      setMessage('在浏览器中打开失败：' + (e as Error).message)
-    }
+    void (async () => {
+      try {
+        const r = await notes().openNoteInBrowser?.(rel)
+        if (!r) setMessage('打开失败：宿主接口不可用', 3600)
+        else if (!r.ok) setMessage('打开失败：' + (r.message || '未知错误'), 4000)
+        else setMessage('已在浏览器中打开', 1800)
+      } catch (e) {
+        setMessage('在浏览器中打开失败：' + (e as Error).message, 4000)
+      }
+    })()
   }
 
 

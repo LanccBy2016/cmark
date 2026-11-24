@@ -71,6 +71,8 @@ export interface NotesApi {
   onWorkspaceChange(cb: () => void): void
 
   openExternal?(url: string): void
+  /** 用系统默认程序打开笔记文件；返回 Promise（preload 侧用 electron.shell.openPath 拿真实错误） */
+  openNoteInBrowser?(rel: string): Promise<{ ok: boolean; message?: string }>
   shellShowItem?(rel: string): OpBridgeResult
   shellShowWorkspace?(): void
 
@@ -158,11 +160,6 @@ export function hostApi(): HostApi | undefined {
 /** 启动期错误（preload 挂载失败时写入） */
 export function bootErrors(): string[] {
   return pick<string[]>('__CMARK_BOOT_ERRORS') || []
-}
-
-/** 导出/附件服务（preload 挂在 window.services 上的旧对象，只有导出链路还在用） */
-export function services<T>(): T | undefined {
-  return pick<T>('services')
 }
 
 /** 当前工作区绝对路径（部分组件用于展示） */

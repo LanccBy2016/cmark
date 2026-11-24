@@ -10,7 +10,7 @@
  * 逐元素内联 computed style，连同图表 SVG、katex 公式、代码 token 配色一起带走。
  */
 
-import { hasNotes, notes, services } from '../../runtime/legacy-bridge'
+import { hasNotes, notes } from '../../runtime/legacy-bridge'
 export type ExportKind = 'md' | 'html' | 'pdf' | 'image'
 
 type Svc = {
@@ -18,7 +18,7 @@ type Svc = {
     dir: string,
     name: string,
     content: string,
-    paths: string[]
+    paths: Array<string | { from: string; name: string }>
   ) => { ok?: boolean; canceled?: boolean; message?: string } | undefined
   writeHtmlFile?: (
     dir: string,
@@ -37,15 +37,21 @@ type Svc = {
     outDir?: string,
     theme?: 'light' | 'dark'
   ) => void
-  dialogSaveExportFile?: (tmpPath: string, name: string, ext: string) => void
+  dialogSaveExportFile?: (tmpPath: string, name: string, ext: string) => unknown
   getKatexCss?: () => string
   pickExportDir?: () => { ok: boolean; dir?: string; canceled?: boolean; message?: string }
 }
 
-/** 宿主桥。V1.1.0 挂在 window.__CMARK，不是 window.services */
+/**
+ * 宿主桥：只认 window.__CMARK。
+ *
+ * 不要再退回 window.services —— preload 里那份 services.js 是 V1.0.0 的另一套实现，
+ * 与这里的调用约定不一致（缺 pickExportDir / getKatexCss，返回路径字符串而不是 {ok,...}）。
+ * 退回它实测的后果是：md/html 导出一律被判成「已取消导出」（pickExportDir 取不到），
+ * PDF/图片走它自己的 createBrowserWindow 路径会把渲染进程卡死。
+ */
 function svc(): Svc | undefined {
-  // 导出服务优先用 preload 挂在 window.services 的那份，其次退回笔记桥
-  return services<Svc>() || (hasNotes() ? (notes() as unknown as Svc) : undefined)
+  return hasNotes() ? (notes() as unknown as Svc) : undefined
 }
 
 /* ================= 编辑区 DOM 快照 ================= */
@@ -337,18 +343,133 @@ export function snapshotEditorHtml(noteRel?: string): { html: string; ok: boolea
   }
 }
 
+/** 导出附件：纯路径，或「源文件 + 目标文件名」（同名图片改名后必须成对传） */
+export type ExportAttachment = string | { from: string; name: string }
+
+/**
+ * 把正文里的本地图片解析成绝对路径，供导出时一起复制；同时把引用改写成 ./文件名。
+ *
+ * 为什么必须做：笔记里的图片有三种写法（相对笔记 ../.cmark/attachments/x.png、
+ * 相对工作区 assets/x.png、私有协议 attachment:<digest>），导出到别的目录后
+ * 一个都打不开 —— md 能看，图全是断的。
+ *
+ * 三条硬约束（都踩过）：
+ *   1. 代码块 / 行内代码里的 `![x](a.png)` 是示例文本，改写它等于改坏用户原文；
+ *   2. 同名不同目录必须改名，且新名字要一起交给 preload —— 它按 basename 落盘，
+ *      只传路径会把两张图写成同一个文件，正文里的 ./a-2.png 根本不存在；
+ *   3. 名字里有空格或括号时 destination 必须用尖括号包住，否则 Markdown 解析不出路径。
+ */
+function collectMdImages(
+  content: string,
+  rel: string
+): { text: string; attachments: ExportAttachment[]; missing: number } {
+  const api = notes() as unknown as { resolveImageUrl?: (src: string, noteRel?: string) => string }
+  const resolve = api.resolveImageUrl
+  if (!resolve || !content) return { text: content, attachments: [], missing: 0 }
+
+  const nameOf = (abs: string) => abs.split(/[\\/]/).pop() || 'image.png'
+  const used = new Set<string>()
+  const byAbs = new Map<string, string>()
+  const attachments: ExportAttachment[] = []
+  let missing = 0
+
+  const unique = (base: string) => {
+    if (!used.has(base)) {
+      used.add(base)
+      return base
+    }
+    const dot = base.lastIndexOf('.')
+    const stem = dot > 0 ? base.slice(0, dot) : base
+    const ext = dot > 0 ? base.slice(dot) : ''
+    let i = 2
+    let cand = `${stem}-${i}${ext}`
+    while (used.has(cand)) {
+      i++
+      cand = `${stem}-${i}${ext}`
+    }
+    used.add(cand)
+    return cand
+  }
+
+  const IMG = /(!\[[^\]]*\]\()(<[^>]*>|[^)\s]+)((?:\s+"[^"]*")?\))/g
+
+  const rewrite = (seg: string) =>
+    seg.replace(IMG, (m, head: string, rawSrc: string, tail: string) => {
+      const src = rawSrc.startsWith('<') ? rawSrc.slice(1, -1) : rawSrc
+      if (!src || /^(https?:|data:|mailto:)/i.test(src)) return m
+      let fileUrl = ''
+      try {
+        fileUrl = resolve(src, rel) || ''
+      } catch (e) {
+        fileUrl = ''
+      }
+      if (!fileUrl) {
+        missing++
+        return m
+      }
+      let abs = ''
+      try {
+        const u = new URL(fileUrl)
+        let p = decodeURIComponent(u.pathname)
+        if (/^\/[A-Za-z]:\//.test(p)) p = p.slice(1) // /D:/x.png → D:/x.png
+        abs = p // 保持正斜杠：Node 的 fs 接口两条斜杠都接受，少一次转换少一个错
+      } catch (e) {
+        missing++
+        return m
+      }
+      // Windows 路径大小写不敏感，同一张图不能因为大小写差异被当成两张
+      const key = abs.toLowerCase()
+      let name = byAbs.get(key)
+      if (!name) {
+        name = unique(nameOf(abs))
+        byAbs.set(key, name)
+        attachments.push({ from: abs, name })
+      }
+      const dest = /[\s()<>]/.test(name) ? '<./' + name + '>' : './' + name
+      return head + dest + tail
+    })
+
+  // 先切出代码段（``` 围栏与 `行内`），只改写非代码段
+  const parts = content.split(/(```[\s\S]*?```|`[^`\n]*`)/)
+  const text = parts.map((seg, i) => (i % 2 === 1 ? seg : rewrite(seg))).join('')
+
+  return { text, attachments, missing }
+}
+
 /* ================= 导出主流程 ================= */
 
-function pickExportDir(): string | null {
+type PickDirResult = { ok: true; dir: string } | { ok: false; canceled?: boolean; message?: string }
+
+/** 三态：成功 / 用户取消 / 宿主不支持。「不支持」不能也报成「已取消导出」 */
+function pickExportDir(): PickDirResult {
+  const api = svc()
+  if (!api?.pickExportDir) return { ok: false, message: '导出失败：宿主不支持选择导出目录' }
   try {
-    const r = svc()?.pickExportDir?.()
-    if (!r || !r.ok || !r.dir) return null
-    return r.dir
+    const r = api.pickExportDir()
+    if (!r) return { ok: false, message: '导出失败：选择目录没有返回结果' }
+    if (r.canceled) return { ok: false, canceled: true }
+    if (!r.ok || !r.dir) return { ok: false, canceled: true }
+    return { ok: true, dir: r.dir }
   } catch (err) {
     console.error('[pickExportDir]', err)
-    return null
+    return { ok: false, message: '导出失败：' + ((err as Error)?.message || '选择目录出错') }
   }
 }
+
+/** 笔记自身所在目录（小写、正斜杠、去掉尾部斜杠），用于拦截「导出到自己目录」 */
+function noteDirOf(rel: string): string {
+  try {
+    const api = notes() as unknown as { absOf?: (r: string) => string }
+    const abs = String(api.absOf?.(rel) || '')
+    if (!abs) return ''
+    const s = abs.split(/[\\/]/).filter(Boolean).join('/').toLowerCase()
+    return s.slice(0, s.lastIndexOf('/')).toLowerCase()
+  } catch (e) {
+    return ''
+  }
+}
+
+const normDir = (p: string) => p.split(/[\\/]/).filter(Boolean).join('/').toLowerCase()
 
 export type ExportOptions = {
   rel: string
@@ -380,12 +501,22 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
 
     // Markdown 直接写原文，不经过任何渲染
     if (kind === 'md') {
-      const dir = pickExportDir()
-      if (dir === null) {
-        setMessage('已取消导出', 1600)
+      const picked = pickExportDir()
+      if (!picked.ok) {
+        if (picked.canceled) setMessage('已取消导出', 1600)
+        else setMessage(picked.message || '导出失败', 3600)
         return
       }
-      const r = S.writeMarkdownFile?.(dir, baseName, content, [])
+      const dir = picked.dir
+      // 导出到笔记自己的目录 = 拿改写后的内容覆盖原笔记（图片引用会被写坏），必须拦住
+      if (noteDirOf(rel) && noteDirOf(rel) === normDir(dir)) {
+        setMessage('导出目录不能是笔记所在目录（会覆盖原笔记），请换一个目录', 4200)
+        return
+      }
+      // 图片必须一起带走：正文里是相对笔记/工作区的路径或 attachment: 私有协议，
+      // 原样导出到别的目录必然全断图
+      const imgs = collectMdImages(content, rel)
+      const r = S.writeMarkdownFile?.(dir, baseName, imgs.text, imgs.attachments)
       if (!r) {
         setMessage('导出失败：宿主未实现 writeMarkdownFile', 3600)
         return
@@ -398,7 +529,12 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
         setMessage('导出失败：' + (r.message || '未知错误'), 3600)
         return
       }
-      setMessage('已导出 Markdown', 2000)
+      if (imgs.missing > 0) {
+        // 不能静默：引用的图找不到时保留原路径，用户要知道有几张没跟上
+        setMessage(`已导出 Markdown（${imgs.missing} 张图片未找到，已保留原引用）`, 4200)
+      } else {
+        setMessage(imgs.attachments.length ? `已导出 Markdown（含 ${imgs.attachments.length} 张图片）` : '已导出 Markdown', 2400)
+      }
       return
     }
 
@@ -416,9 +552,15 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
     const hasMath = /class="katex/.test(html)
 
     if (kind === 'html') {
-      const dir = pickExportDir()
-      if (dir === null) {
-        setMessage('已取消导出', 1600)
+      const picked = pickExportDir()
+      if (!picked.ok) {
+        if (picked.canceled) setMessage('已取消导出', 1600)
+        else setMessage(picked.message || '导出失败', 3600)
+        return
+      }
+      const dir = picked.dir
+      if (noteDirOf(rel) && noteDirOf(rel) === normDir(dir)) {
+        setMessage('导出目录不能是笔记所在目录（会覆盖同名文件），请换一个目录', 4200)
         return
       }
       // selfContained = true：快照已内联全部样式，不能再套 github-markdown.css，
@@ -460,13 +602,26 @@ export async function exportNote(kind: ExportKind, opts: ExportOptions): Promise
           done('导出失败：渲染窗口没有返回文件', 3600)
           return
         }
+        let saved: unknown
         try {
-          S.dialogSaveExportFile?.(path, baseName, kind === 'image' ? 'png' : 'pdf')
+          saved = S.dialogSaveExportFile?.(path, baseName, kind === 'image' ? 'png' : 'pdf')
         } catch (e) {
           done('导出失败：' + ((e as Error)?.message || ''), 3600)
           return
         }
-        resolve()
+        // null = 用户在保存框里取消了；{ok:false} = 保存失败（占用/无权限/磁盘满）；
+        // undefined = 老版 preload 不返回值，按成功处理
+        if (saved === null) {
+          done('已取消导出', 1600)
+          return
+        }
+        const saveRes = saved as { ok?: boolean; message?: string } | undefined
+        if (saveRes && saveRes.ok === false) {
+          done('导出失败：' + (saveRes.message || '保存失败'), 4000)
+          return
+        }
+        // 成功也必须给反馈：以前这条链路全程静默，用户以为点了没反应
+        done(kind === 'image' ? '已导出图像' : '已导出 PDF', 2000)
       }, undefined, theme)
     })
   } catch (e) {

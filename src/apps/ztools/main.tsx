@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import App from '../../ui/desktop/App'
 import { installMockIfNeeded } from '../../adapters/browser/mock'
 import { installPorts } from '../../runtime/ports'
+import { installCompositorKeepalive } from '../../runtime/compositor-keepalive'
 import { createElectronPorts } from '../../adapters/electron/ports'
 import 'katex/dist/katex.min.css'
 import '../../ui/styles/app.css'
@@ -12,6 +13,9 @@ installMockIfNeeded()
 // 端口的 electron 实现只是把 preload 的同步桥包成 async；
 // 纯浏览器预览时桥是 mock，同样能跑通，不需要额外分支。
 installPorts(createElectronPorts())
+// 防「长时间空闲后整窗白屏」：ZTools 是 WebContentsView，Windows 遮挡检测会停渲染，
+// 恢复后不重绘，只有 resize 才回来。周期性出帧让 surface 活着。
+installCompositorKeepalive()
 
 /** 把运行时错误写到磁盘可读的位置，避免白屏后无从查起 */
 function recordError(where: string, e: unknown) {
