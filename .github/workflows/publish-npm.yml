@@ -97,6 +97,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ver=$(node -p "require('./package.json').version")
+          # 发布说明取 CHANGELOG 里对应版本那一段：--generate-notes 只会给一个 compare 链接，
+          # 用户点进来看到的是空页面。措辞以 CHANGELOG 为准，避免两处维护两套说法。
+          node scripts/release-notes.mjs "${ver}" > release-notes.md
           gh release create "v${ver}" "cmark-${ver}.upx" \
             --title "CMark ${ver}" \
-            --generate-notes
+            --notes-file release-notes.md
